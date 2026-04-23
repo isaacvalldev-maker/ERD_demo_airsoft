@@ -786,6 +786,30 @@ def build_groups(schema: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return results
 
 
+def build_groups_airsoft_only(schema: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Build only Airsoft datasets (full + modules) from a schema.
+    Useful for mixed-mode where Airsoft comes from DB2 and RATS/TML from Oracle.
+    """
+    airsoft_tables: Dict[str, List[str]] = {
+        module_id: [] for module_id, _label, _prefixes in AIRSOFT_MODULES
+    }
+    for table in schema.get("tables", []):
+        airsoft_group = classify_airsoft_module(table)
+        if airsoft_group:
+            airsoft_tables[airsoft_group].append(table)
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for module_id, _label, _prefixes in AIRSOFT_MODULES:
+        results[module_id] = group_from_tables(schema, module_id, airsoft_tables[module_id])
+
+    all_air: Set[str] = set()
+    for _mid, tlist in airsoft_tables.items():
+        all_air.update(tlist)
+    results[AIRSOFT_DATASET_ID] = group_from_tables(schema, AIRSOFT_DATASET_ID, sorted(all_air))
+    return results
+
+
 def merge_existing_schema(output_dir: Path) -> Dict[str, Any]:
     merged = {
         "tables": [],
@@ -977,9 +1001,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        choices=("oracle", "db2"),
+        choices=("oracle", "db2", "mixed"),
         default="oracle",
-        help="Motor de BD para extraer metadata: oracle o db2 (DB2 LUW via SYSCAT)",
+        help="Motor de BD: oracle, db2 (DB2 LUW via SYSCAT), o mixed (Oracle para RATS/TML + DB2 para Airsoft)",
     )
     parser.add_argument(
         "--env-file",
@@ -1122,7 +1146,7 @@ def main() -> None:
                 )
             finally:
                 conn.close()
-        else:
+        elif args.db == "db2":
             required = ["DB2_HOST", "DB2_PORT", "DB2_DBNAME", "DB2_USER", "DB2_PASSWORD"]
             missing = [k for k in required if not env_data.get(k)]
             if missing:
@@ -1150,8 +1174,66 @@ def main() -> None:
                     conn.close()
                 except Exception:
                     pass
+        else:
+            required_oracle = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_SERVICE"]
+            missing_oracle = [k for k in required_oracle if not env_data.get(k)]
+            if missing_oracle:
+                raise ValueError(f"Faltan variables Oracle (modo mixed) en {env_path}: {', '.join(missing_oracle)}")
 
-        grouped = build_groups(schema)
+            required_db2 = ["DB2_HOST", "DB2_PORT", "DB2_DBNAME", "DB2_USER", "DB2_PASSWORD"]
+            missing_db2 = [k for k in required_db2 if not env_data.get(k)]
+            if missing_db2:
+                raise ValueError(f"Faltan variables DB2 (modo mixed) en {env_path}: {', '.join(missing_db2)}")
+
+            oracle_cfg = {
+                "host": env_data["DB_HOST"],
+                "port": int(env_data.get("DB_PORT", "1521")),
+                "user": env_data["DB_USER"],
+                "password": env_data["DB_PASSWORD"],
+                "service_name": env_data["DB_SERVICE"],
+            }
+            db2_cfg = {
+                "host": env_data["DB2_HOST"],
+                "port": int(env_data.get("DB2_PORT", "50000")),
+                "dbname": env_data["DB2_DBNAME"],
+                "user": env_data["DB2_USER"],
+                "password": env_data["DB2_PASSWORD"],
+                "security": env_data.get("DB2_SECURITY") or None,
+            }
+
+            print("Conectando a Oracle (RATS/TML) y DB2 (Airsoft) para extraer esquema...")
+            conn_oracle = get_db_connection_oracle(oracle_cfg)
+            try:
+                oracle_schema = get_schema(
+                    conn_oracle,
+                    with_comments=args.with_comments,
+                    owners=None,
+                )
+            finally:
+                conn_oracle.close()
+
+            conn_db2 = get_db_connection_db2(db2_cfg)
+            try:
+                db2_schema = get_schema_db2(
+                    conn_db2,
+                    with_comments=args.with_comments,
+                    schemas=None,
+                )
+            finally:
+                try:
+                    conn_db2.close()
+                except Exception:
+                    pass
+
+            grouped = {}
+            base = build_groups(oracle_schema)
+            grouped["rats"] = base.get("rats", {})
+            grouped["tml"] = base.get("tml", {})
+            air = build_groups_airsoft_only(db2_schema)
+            grouped.update(air)
+
+        if args.db != "mixed":
+            grouped = build_groups(schema)
     print(f"Modo descripciones IA: {ai_mode}")
     write_outputs(
         grouped,

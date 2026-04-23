@@ -11,20 +11,45 @@ Todo lo necesario para el visor ERD quedó agrupado en una sola carpeta:
 - `erd/data/airsoft_module7_contract_quotation.schema.json`
 - `erd/data/airsoft_module8_invoice_systems.schema.json`
 - `erd/data/datasets.manifest.json` (pestañas dinámicas del visor)
-- `erd/build_erd_data_from_env.py` (genera JSON desde Oracle + `.env`)
+- `erd/build_erd_data_from_env.py` (genera JSON desde Oracle o DB2 + `.env`)
 
 `index.html` en la raíz solo redirige a `erd/index.html`.
 
 ## Generar datos desde .env (auto RATS/TML + módulos)
 
-1. Copia `erd/.env.example` a `erd/.env` y llena credenciales Oracle.
+1. Copia `erd/.env.example` a `erd/.env` y llena credenciales (Oracle y/o DB2).
 2. Desde la raíz de este repo:
 
-`python3 erd/build_erd_data_from_env.py --with-comments --ai-mode heuristic`
+### Oracle
+
+`python3 erd/build_erd_data_from_env.py --db oracle --with-comments --ai-mode heuristic`
+
+Variables `.env` (Oracle):
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_SERVICE`
+
+### DB2 (LUW)
+
+`python3 erd/build_erd_data_from_env.py --db db2 --with-comments --ai-mode heuristic`
+
+Variables `.env` (DB2):
+- `DB2_HOST`, `DB2_PORT` (default 50000), `DB2_DBNAME`, `DB2_USER`, `DB2_PASSWORD`
+- opcional: `DB2_SECURITY`
+
+Dependencia:
+- `pip install ibm_db ibm_db_dbi`
+
+### Mixed (Oracle para RATS/TML + DB2 para Airsoft)
+
+`python3 erd/build_erd_data_from_env.py --db mixed --with-comments --ai-mode heuristic`
+
+Este modo genera:
+- `rats.schema.json`, `tml.schema.json` desde **Oracle**
+- `airsoft_full.schema.json` + `airsoft_module*.schema.json` desde **DB2**
+- Relaciones se muestran **locales** a cada motor (no hay FKs cross-DB en catálogo).
 
 El script:
-- se conecta a Oracle con variables `DB_*`
-- extrae esquema completo
+- se conecta a Oracle con variables `DB_*` (o DB2 con `DB2_*`)
+- extrae esquema completo (según el motor)
 - detecta automáticamente qué tablas son de **RATS** y cuáles de **TML**
 - separa automáticamente tablas en módulos:
   - Module 4: Non-Routine Data Base
