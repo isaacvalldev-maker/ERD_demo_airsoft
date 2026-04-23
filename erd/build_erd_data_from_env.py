@@ -37,7 +37,7 @@ AIRSOFT_FILE = f"{AIRSOFT_DATASET_ID}.schema.json"
 AIRSOFT_TOP_LABEL = "Airsoft (vista completa)"
 
 # Bump cuando cambia el template de explicacion (invalida .ai_explanations_cache.json antiguo).
-AI_EXPL_CACHE_VER = 3
+AI_EXPL_CACHE_VER = 4
 
 AIRSOFT_MODULES: List[Tuple[str, str, Tuple[str, ...]]] = [
     (
@@ -495,49 +495,25 @@ def generate_ai_table_explanation(
     nombres de columna, PK, FK, conteos y comentario Oracle (si existe).
     No afirma procesos de negocio no respaldados por comentarios/metadata.
     """
+    # Solo descripcion funcional. Sin comentario (tabla/columnas) no inferimos propósito.
     short = table_short_name(table_name)
-    n_cols = len(columns)
-    pk_text = ", ".join(pks[:3]) if pks else "sin PK declarada"
-    fk_out = len(refs_out)
-    fk_in = len(refs_in)
-    nullable_count = sum(1 for c in columns if c.get("nullable"))
-    required_count = max(0, n_cols - nullable_count)
-
-    hint_cols = []
-    for c in columns:
-        name = (c.get("name") or "").upper()
-        if any(k in name for k in ("ID", "COD", "CODE", "STATUS", "ESTADO", "FECHA", "DATE", "EMP", "USER")):
-            hint_cols.append(c.get("name"))
-    hint_cols = [c for c in hint_cols if c][:4]
-    hint_text = ", ".join(hint_cols) if hint_cols else "sin columnas clave detectadas por nombre"
-
-    to_tables = sorted({table_short_name(r.get("to_table", "")) for r in refs_out if r.get("to_table")})[:4]
-    from_tables = sorted({table_short_name(r.get("from_table", "")) for r in refs_in if r.get("from_table")})[:4]
-    out_text = ", ".join(to_tables) if to_tables else "ninguna"
-    in_text = ", ".join(from_tables) if from_tables else "ninguna"
 
     if table_comment and table_comment.strip():
-        base_purpose = f"{table_comment.strip()} "
-    else:
-        # Sin comentario no inferimos finalidad: solo hechos observables.
-        base_purpose = ""
+        return table_comment.strip()
 
-    links = (
-        f"Conecta con otras entidades: {fk_out} salida(s) hacia [{out_text}] y "
-        f"{fk_in} entrada(s) desde [{in_text}]. "
-    )
+    # Intentar con comentarios de columnas si existen (sin inventar propósito).
+    col_comments: List[str] = []
+    for c in columns:
+        cc = (c.get("comment") or "").strip()
+        if cc:
+            col_comments.append(cc)
+        if len(col_comments) >= 4:
+            break
+    if col_comments:
+        joined = "; ".join(col_comments[:4])
+        return f"{short}: {joined}"
 
-    identity = (
-        f"Identificacion/unicidad: PK [{pk_text}]. "
-    )
-
-    hints = f"Nombres de columna destacados por nombre: {hint_text}. "
-
-    if base_purpose:
-        # Si hay comentario, lo tratamos como fuente de propósito.
-        return " ".join([base_purpose, links, identity, hints]).strip()
-
-    return " ".join([links, identity, hints]).strip()
+    return "Sin descripción funcional disponible (sin comentarios en catálogo)."
 
 
 def generate_ollama_table_explanation(
@@ -710,12 +686,11 @@ def ensure_ai_explanations(
         refs_by_to.setdefault(r["to_table"], []).append(r)
 
     for table_name in payload.get("tables", []):
-        # Heuristic mode is deterministic: always refresh so wording/template changes apply
-        # and stale "hedged" text doesn't persist in committed JSON.
-        if ai_mode != "ollama" and ai.get(table_name):
+        # Heuristic mode is deterministic: always refresh and do NOT reuse cache.
+        if ai_mode != "ollama":
             ai.pop(table_name, None)
         cache_key = f"v{AI_EXPL_CACHE_VER}:{dataset_id}:{table_name}"
-        if ai_cache.get(cache_key):
+        if ai_mode == "ollama" and ai_cache.get(cache_key):
             ai[table_name] = ai_cache[cache_key]
             continue
 
@@ -744,7 +719,8 @@ def ensure_ai_explanations(
             text = generate_ai_table_explanation(table_name, columns, pks, refs, refs_in, table_comment)
 
         ai[table_name] = text
-        ai_cache[cache_key] = text
+        if ai_mode == "ollama":
+            ai_cache[cache_key] = text
     payload["ai_table_explanations"] = ai
     return payload
 
