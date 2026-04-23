@@ -26,6 +26,12 @@ try:
 except ImportError:
     oracledb = None
 
+try:
+    # Optional dependency for DB2 connectivity (LUW): pip install ibm_db ibm_db_dbi
+    import ibm_db_dbi  # type: ignore
+except ImportError:
+    ibm_db_dbi = None
+
 AIRSOFT_DATASET_ID = "airsoft_full"
 AIRSOFT_FILE = f"{AIRSOFT_DATASET_ID}.schema.json"
 AIRSOFT_TOP_LABEL = "Airsoft (vista completa)"
@@ -87,7 +93,27 @@ def _fmt_type(t, length, precision, scale):
     return t or "?"
 
 
-def get_db_connection(db_config: Dict[str, Any]):
+def _fmt_type_db2(type_name: str, length: Optional[int], scale: Optional[int]) -> str:
+    """
+    Format DB2 column types. We keep it simple and deterministic.
+    """
+    tn = (type_name or "").upper()
+    if tn in {"VARCHAR", "CHAR", "GRAPHIC", "VARGRAPHIC"} and length:
+        return f"{tn}({length})"
+    if tn in {"DECIMAL", "DECFLOAT", "NUMERIC"}:
+        if length is not None and scale is not None:
+            return f"{tn}({length},{scale})"
+        if length is not None:
+            return f"{tn}({length})"
+        return tn
+    if tn in {"TIMESTAMP", "DATE", "TIME"}:
+        return tn
+    if tn in {"CLOB", "BLOB", "DBCLOB"} and length:
+        return f"{tn}({length})"
+    return tn or "?"
+
+
+def get_db_connection_oracle(db_config: Dict[str, Any]):
     if oracledb is None:
         raise RuntimeError("Falta dependencia `oracledb` (pip install oracledb)")
     dsn = f"{db_config['host']}:{db_config['port']}/{db_config['service_name']}"
@@ -97,6 +123,202 @@ def get_db_connection(db_config: Dict[str, Any]):
         dsn=dsn,
         tcp_connect_timeout=120,
     )
+
+
+def get_db_connection_db2(db2_config: Dict[str, Any]):
+    """
+    DB2 LUW connection using ibm_db_dbi (DB-API).
+    Env mapping:
+      - DB2_HOST, DB2_PORT, DB2_DBNAME, DB2_USER, DB2_PASSWORD
+      - optional: DB2_SECURITY (e.g. SSL), DB2_PROTOCOL (default TCPIP)
+    """
+    if ibm_db_dbi is None:
+        raise RuntimeError("Falta dependencia DB2 `ibm_db_dbi` (pip install ibm_db ibm_db_dbi)")
+    host = db2_config["host"]
+    port = int(db2_config.get("port", 50000))
+    dbname = db2_config["dbname"]
+    user = db2_config["user"]
+    password = db2_config["password"]
+    protocol = db2_config.get("protocol", "TCPIP")
+    security = db2_config.get("security")
+    # Minimal DSN; extra parameters can be extended as needed.
+    parts = [
+        f"DATABASE={dbname}",
+        f"HOSTNAME={host}",
+        f"PORT={port}",
+        f"PROTOCOL={protocol}",
+        f"UID={user}",
+        f"PWD={password}",
+    ]
+    if security:
+        parts.append(f"SECURITY={security}")
+    dsn = ";".join(parts) + ";"
+    return ibm_db_dbi.connect(dsn, "", "")
+
+
+def get_schema_db2(
+    connection,
+    with_comments: bool = False,
+    schemas: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Extract schema metadata from DB2 (LUW) using SYSCAT catalog views.
+    Returns the same structure as `get_schema` (Oracle):
+      tables: ["SCHEMA.TABLE", ...]
+      columns: { "SCHEMA.TABLE": [{"name","type","nullable","comment"}] }
+      pks: { "SCHEMA.TABLE": ["COL1", ...] }
+      uqs: { "SCHEMA.TABLE": ["COLX", ...] }  # flattened columns across UQ constraints
+      refs: [{"from_table","from_col","to_table","to_col"}]
+      table_comments: { "SCHEMA.TABLE": "..." }
+    """
+    cur = connection.cursor()
+
+    def schema_clause(col: str) -> Tuple[str, List[Any]]:
+        if schemas:
+            sch = [s.upper() for s in schemas]
+            placeholders = ",".join(["?"] * len(sch))
+            return f"{col} IN ({placeholders})", sch
+        # Filter out system schemas by default (keep deterministic but conservative)
+        return (
+            f"{col} NOT LIKE 'SYS%' AND {col} NOT IN ('NULLID','SQLJ','SYSTOOLS','SYSCAT','SYSIBM','SYSIBMADM','SYSSTAT')",
+            [],
+        )
+
+    wh, args = schema_clause("TABSCHEMA")
+    cur.execute(
+        f"SELECT TABSCHEMA, TABNAME, REMARKS FROM SYSCAT.TABLES WHERE TYPE='T' AND {wh} ORDER BY TABSCHEMA, TABNAME",
+        args,
+    )
+    rows = cur.fetchall()
+    tables = [f"{r[0].strip()}.{r[1].strip()}" for r in rows]
+    table_set: Set[str] = set(tables)
+
+    table_comments: Dict[str, str] = {}
+    if with_comments:
+        for r in rows:
+            key = f"{r[0].strip()}.{r[1].strip()}"
+            rem = (r[2] or "").strip()
+            if rem:
+                table_comments[key] = rem
+
+    wh, args = schema_clause("TABSCHEMA")
+    cur.execute(
+        f"SELECT TABSCHEMA, TABNAME, COLNAME, TYPENAME, LENGTH, SCALE, NULLS, COLNO, REMARKS "
+        f"FROM SYSCAT.COLUMNS WHERE {wh} ORDER BY TABSCHEMA, TABNAME, COLNO",
+        args,
+    )
+    columns: Dict[str, List[Dict[str, Any]]] = {}
+    for r in cur.fetchall():
+        t = f"{r[0].strip()}.{r[1].strip()}"
+        if t not in table_set:
+            continue
+        comment = (r[8] or "").strip() if with_comments else None
+        if comment == "":
+            comment = None
+        columns.setdefault(t, []).append(
+            {
+                "name": r[2].strip(),
+                "type": _fmt_type_db2(r[3], r[4], r[5]),
+                "nullable": (r[6] or "").upper() == "Y",
+                "comment": comment,
+            }
+        )
+
+    # Constraints: PK and UQ
+    wh, args = schema_clause("C.TABSCHEMA")
+    cur.execute(
+        f"SELECT C.TABSCHEMA, C.TABNAME, C.CONSTNAME, C.TYPE "
+        f"FROM SYSCAT.TABCONST C WHERE {wh} AND C.TYPE IN ('P','U')",
+        args,
+    )
+    cons = cur.fetchall()
+    pk_const: Dict[str, str] = {}
+    uq_consts: Dict[str, List[str]] = {}
+    for sch, tab, cname, ctype in cons:
+        t = f"{sch.strip()}.{tab.strip()}"
+        if t not in table_set:
+            continue
+        if ctype == "P":
+            pk_const[t] = cname.strip()
+        elif ctype == "U":
+            uq_consts.setdefault(t, []).append(cname.strip())
+
+    pks: Dict[str, List[str]] = {}
+    uqs: Dict[str, List[str]] = {}
+
+    # PK columns
+    for t, cname in pk_const.items():
+        sch, tab = t.split(".", 1)
+        cur.execute(
+            "SELECT COLNAME FROM SYSCAT.KEYCOLUSE "
+            "WHERE TABSCHEMA=? AND TABNAME=? AND CONSTNAME=? ORDER BY COLSEQ",
+            [sch, tab, cname],
+        )
+        pks[t] = [rr[0].strip() for rr in cur.fetchall()]
+
+    # UQ columns (flattened across unique constraints, deterministic order by constraint then colseq)
+    for t, cnames in uq_consts.items():
+        sch, tab = t.split(".", 1)
+        cols_acc: List[str] = []
+        for cname in sorted(set(cnames)):
+            cur.execute(
+                "SELECT COLNAME FROM SYSCAT.KEYCOLUSE "
+                "WHERE TABSCHEMA=? AND TABNAME=? AND CONSTNAME=? ORDER BY COLSEQ",
+                [sch, tab, cname],
+            )
+            cols_acc.extend([rr[0].strip() for rr in cur.fetchall()])
+        if cols_acc:
+            uqs[t] = cols_acc
+
+    # Foreign keys
+    wh, args = schema_clause("R.TABSCHEMA")
+    cur.execute(
+        f"SELECT R.TABSCHEMA, R.TABNAME, R.CONSTNAME, R.REFTABSCHEMA, R.REFTABNAME, R.REFKEYNAME "
+        f"FROM SYSCAT.REFERENCES R WHERE {wh}",
+        args,
+    )
+    fk_rows = cur.fetchall()
+    refs: List[Dict[str, Any]] = []
+    for sch, tab, constname, rsch, rtab, refkey in fk_rows:
+        from_table = f"{sch.strip()}.{tab.strip()}"
+        to_table = f"{rsch.strip()}.{rtab.strip()}"
+        if from_table not in table_set or to_table not in table_set:
+            continue
+        constname = constname.strip()
+        refkey = refkey.strip()
+        # Child cols
+        cur.execute(
+            "SELECT COLNAME FROM SYSCAT.KEYCOLUSE "
+            "WHERE TABSCHEMA=? AND TABNAME=? AND CONSTNAME=? ORDER BY COLSEQ",
+            [sch.strip(), tab.strip(), constname],
+        )
+        child_cols = [rr[0].strip() for rr in cur.fetchall()]
+        # Parent cols (by referenced key name)
+        cur.execute(
+            "SELECT COLNAME FROM SYSCAT.KEYCOLUSE "
+            "WHERE TABSCHEMA=? AND TABNAME=? AND CONSTNAME=? ORDER BY COLSEQ",
+            [rsch.strip(), rtab.strip(), refkey],
+        )
+        parent_cols = [rr[0].strip() for rr in cur.fetchall()]
+        for i in range(min(len(child_cols), len(parent_cols))):
+            refs.append(
+                {
+                    "from_table": from_table,
+                    "from_col": child_cols[i],
+                    "to_table": to_table,
+                    "to_col": parent_cols[i],
+                }
+            )
+
+    cur.close()
+    return {
+        "tables": tables,
+        "columns": columns,
+        "pks": pks,
+        "uqs": uqs,
+        "refs": refs,
+        "table_comments": table_comments if with_comments else {},
+    }
 
 
 def get_schema(connection, with_comments: bool = False, owners: Optional[List[str]] = None):
@@ -751,12 +973,21 @@ def write_outputs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Genera data ERD (RATS/TML + módulos) desde Oracle usando .env"
+        description="Genera data ERD (RATS/TML + módulos) desde Oracle o DB2 usando .env"
+    )
+    parser.add_argument(
+        "--db",
+        choices=("oracle", "db2"),
+        default="oracle",
+        help="Motor de BD para extraer metadata: oracle o db2 (DB2 LUW via SYSCAT)",
     )
     parser.add_argument(
         "--env-file",
         default="erd/.env",
-        help="Ruta del .env con DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SERVICE",
+        help=(
+            "Ruta del .env. Oracle: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SERVICE. "
+            "DB2: DB2_HOST, DB2_PORT, DB2_DBNAME, DB2_USER, DB2_PASSWORD (opc: DB2_SECURITY)"
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -766,7 +997,7 @@ def main() -> None:
     parser.add_argument(
         "--with-comments",
         action="store_true",
-        help="Incluye comentarios Oracle de tablas/columnas",
+        help="Incluye comentarios de tablas/columnas (Oracle o DB2 si existen)",
     )
     parser.add_argument(
         "--from-existing",
@@ -811,6 +1042,12 @@ def main() -> None:
         "DB_USER",
         "DB_PASSWORD",
         "DB_SERVICE",
+        "DB2_HOST",
+        "DB2_PORT",
+        "DB2_DBNAME",
+        "DB2_USER",
+        "DB2_PASSWORD",
+        "DB2_SECURITY",
         "OLLAMA_URL",
         "OLLAMA_MODEL",
     ]:
@@ -861,29 +1098,58 @@ def main() -> None:
     else:
         if not env_data:
             raise FileNotFoundError(f"No existe el archivo .env: {env_path}")
-        required = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_SERVICE"]
-        missing = [k for k in required if not env_data.get(k)]
-        if missing:
-            raise ValueError(f"Faltan variables en {env_path}: {', '.join(missing)}")
+        if args.db == "oracle":
+            required = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_SERVICE"]
+            missing = [k for k in required if not env_data.get(k)]
+            if missing:
+                raise ValueError(f"Faltan variables Oracle en {env_path}: {', '.join(missing)}")
 
-        db_config = {
-            "host": env_data["DB_HOST"],
-            "port": int(env_data.get("DB_PORT", "1521")),
-            "user": env_data["DB_USER"],
-            "password": env_data["DB_PASSWORD"],
-            "service_name": env_data["DB_SERVICE"],
-        }
+            db_config = {
+                "host": env_data["DB_HOST"],
+                "port": int(env_data.get("DB_PORT", "1521")),
+                "user": env_data["DB_USER"],
+                "password": env_data["DB_PASSWORD"],
+                "service_name": env_data["DB_SERVICE"],
+            }
 
-        print("Conectando a Oracle para extraer esquema...")
-        conn = get_db_connection(db_config)
-        try:
-            schema = get_schema(
-                conn,
-                with_comments=args.with_comments,
-                owners=None,
-            )
-        finally:
-            conn.close()
+            print("Conectando a Oracle para extraer esquema...")
+            conn = get_db_connection_oracle(db_config)
+            try:
+                schema = get_schema(
+                    conn,
+                    with_comments=args.with_comments,
+                    owners=None,
+                )
+            finally:
+                conn.close()
+        else:
+            required = ["DB2_HOST", "DB2_PORT", "DB2_DBNAME", "DB2_USER", "DB2_PASSWORD"]
+            missing = [k for k in required if not env_data.get(k)]
+            if missing:
+                raise ValueError(f"Faltan variables DB2 en {env_path}: {', '.join(missing)}")
+
+            db2_config = {
+                "host": env_data["DB2_HOST"],
+                "port": int(env_data.get("DB2_PORT", "50000")),
+                "dbname": env_data["DB2_DBNAME"],
+                "user": env_data["DB2_USER"],
+                "password": env_data["DB2_PASSWORD"],
+                "security": env_data.get("DB2_SECURITY") or None,
+            }
+
+            print("Conectando a DB2 para extraer esquema...")
+            conn = get_db_connection_db2(db2_config)
+            try:
+                schema = get_schema_db2(
+                    conn,
+                    with_comments=args.with_comments,
+                    schemas=None,
+                )
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         grouped = build_groups(schema)
     print(f"Modo descripciones IA: {ai_mode}")
