@@ -25,6 +25,20 @@
       }
       .tabset button.active, .pill.active { background: #4f46e5; color: white; border-color: #4338ca; }
       .pill.ghost { background: white; }
+      .db-badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        line-height: 1.1;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #475569;
+        vertical-align: middle;
+      }
+      .db-badge.db2 { border-color: #22c55e55; color: #166534; }
+      .db-badge.oracle { border-color: #f59e0b55; color: #92400e; }
       #airsoft-parts { display: none; width: 100%; padding-top: 6px; border-top: 1px solid #e2e8f0; }
       #airsoft-parts .airsoft-filter-label { color: #64748b; font-size: 11px; font-weight: 600; margin-right: 8px; align-self: center; }
       #airsoft-parts .tabset { gap: 5px; flex: 1; flex-wrap: wrap; }
@@ -472,9 +486,16 @@
         return hit ? hit.label : activeDataset;
       }
 
+      function activeDatasetSource() {
+        const hit = datasets.find((d) => d.id === activeDataset);
+        return hit ? hit.source : null;
+      }
+
       function updateStats() {
         const nCols = visibleTables.reduce((acc, t) => acc + (schema.columns[t] || []).length, 0);
-        statsEl.textContent = `${activeDatasetLabel()} · ${visibleTables.length} tablas · ${nCols} columnas · ${visibleRefs.length} relaciones`;
+        const src = activeDatasetSource();
+        const srcTxt = src ? ` · ${src.toUpperCase()}` : "";
+        statsEl.textContent = `${activeDatasetLabel()}${srcTxt} · ${visibleTables.length} tablas · ${nCols} columnas · ${visibleRefs.length} relaciones`;
       }
 
       function isAirsoftDatasetId(key) {
@@ -573,6 +594,18 @@
         tabs.innerHTML = "";
         airsoftTabs.innerHTML = "";
         airsoftGroup = null;
+
+        const setButtonTextWithSource = (btn, text, source) => {
+          btn.textContent = text;
+          const src = (source || "").toLowerCase();
+          if (src === "db2" || src === "oracle") {
+            const badge = document.createElement("span");
+            badge.className = `db-badge ${src === "db2" ? "db2" : "oracle"}`;
+            badge.textContent = src.toUpperCase();
+            btn.appendChild(badge);
+          }
+        };
+
         for (const item of top) {
           if (item && item.id === "rats" && item.file) {
             const btn = document.createElement("button");
@@ -580,11 +613,11 @@
             btn.id = "tab-rats";
             btn.className = "pill";
             btn.dataset.src = item.id;
-            btn.textContent = item.label || "RATS";
+            setButtonTextWithSource(btn, item.label || "RATS", item.source);
             btn.setAttribute("data-layer", "top");
             btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
             tabs.appendChild(btn);
-            flat.push({ id: item.id, label: item.label, file: item.file });
+            flat.push({ id: item.id, label: item.label || "RATS", file: item.file, source: item.source || null });
             continue;
           }
           if (item && item.id === "tml" && item.file) {
@@ -593,11 +626,11 @@
             btn.id = "tab-tml";
             btn.className = "pill";
             btn.dataset.src = item.id;
-            btn.textContent = item.label || "TML";
+            setButtonTextWithSource(btn, item.label || "TML", item.source);
             btn.setAttribute("data-layer", "top");
             btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
             tabs.appendChild(btn);
-            flat.push({ id: item.id, label: item.label, file: item.file });
+            flat.push({ id: item.id, label: item.label || "TML", file: item.file, source: item.source || null });
             continue;
           }
           if (item && (item.kind === "airsoft_root" || item.id === AIRSOFT_ROOT_ID) && item.file) {
@@ -607,11 +640,11 @@
             btn.id = "tab-airsoft";
             btn.className = "pill";
             btn.dataset.src = item.id;
-            btn.textContent = "Airsoft";
+            setButtonTextWithSource(btn, "Airsoft", item.source);
             btn.setAttribute("data-layer", "top");
             btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
             tabs.appendChild(btn);
-            flat.push({ id: item.id, label: "Airsoft · Todo", file: item.file });
+            flat.push({ id: item.id, label: "Airsoft · Todo", file: item.file, source: item.source || null });
             const todoPill = buildFilterPill({ id: item.id, label: item.label, isTodo: true });
             todoPill.addEventListener("click", () => loadDataset(item.id).catch((e) => showError(e.message)));
             airsoftTabs.appendChild(todoPill);
@@ -624,6 +657,7 @@
                 id: ch.id,
                 label: `Airsoft · ${modulePillText(ch.label)}`,
                 file: ch.file,
+                source: ch.source || item.source || null,
               });
             });
             continue;

@@ -886,6 +886,7 @@ def write_outputs(
     ai_mode: str = "heuristic",
     ollama_url: str = "http://127.0.0.1:11434",
     ollama_model: str = "",
+    dataset_sources: Optional[Dict[str, str]] = None,
 ) -> None:
     # Compat: antes filtrabamos pestañas vacias; ahora el manifest v2 siempre lista módulos.
     _ = include_empty_tabs
@@ -930,12 +931,14 @@ def write_outputs(
         out_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         print(f"OK {out_path.name}: {len(payload['tables'])} tablas, {len(payload['refs'])} relaciones")
 
+        src = (dataset_sources or {}).get(dataset_id)
         written[dataset_id] = {
             "id": dataset_id,
             "label": manifest_label(dataset_id),
             "file": out_path.name,
             "tables": len(payload["tables"]),
             "relations": len(payload["refs"]),
+            **({"source": src} if src else {}),
         }
 
     by_id: Dict[str, Dict[str, Any]] = dict(written)
@@ -946,43 +949,46 @@ def write_outputs(
         w = by_id.get(module_id)
         if not w:
             continue
-        airsoft_children.append(
-            {
-                "id": w["id"],
-                "label": w["label"],
-                "file": w["file"],
-                "kind": "airsoft_module",
-                "tables": w.get("tables"),
-                "relations": w.get("relations"),
-            }
-        )
+        child = {
+            "id": w["id"],
+            "label": w["label"],
+            "file": w["file"],
+            "kind": "airsoft_module",
+            "tables": w.get("tables"),
+            "relations": w.get("relations"),
+        }
+        if w.get("source"):
+            child["source"] = w["source"]
+        airsoft_children.append(child)
     top_level: List[Dict[str, Any]] = []
     for key in ("rats", "tml"):
         if key in by_id:
             w = by_id[key]
-            top_level.append(
-                {
-                    "id": w["id"],
-                    "label": w["label"],
-                    "file": w["file"],
-                    "kind": "base",
-                    "tables": w.get("tables"),
-                    "relations": w.get("relations"),
-                }
-            )
-    if AIRSOFT_DATASET_ID in by_id:
-        w = by_id[AIRSOFT_DATASET_ID]
-        top_level.append(
-            {
+            item = {
                 "id": w["id"],
                 "label": w["label"],
                 "file": w["file"],
-                "kind": "airsoft_root",
-                "children": airsoft_children,
+                "kind": "base",
                 "tables": w.get("tables"),
                 "relations": w.get("relations"),
             }
-        )
+            if w.get("source"):
+                item["source"] = w["source"]
+            top_level.append(item)
+    if AIRSOFT_DATASET_ID in by_id:
+        w = by_id[AIRSOFT_DATASET_ID]
+        item = {
+            "id": w["id"],
+            "label": w["label"],
+            "file": w["file"],
+            "kind": "airsoft_root",
+            "children": airsoft_children,
+            "tables": w.get("tables"),
+            "relations": w.get("relations"),
+        }
+        if w.get("source"):
+            item["source"] = w["source"]
+        top_level.append(item)
 
     manifest_obj: Dict[str, Any] = {
         "version": 2,
@@ -1087,6 +1093,7 @@ def main() -> None:
     if ai_mode == "ollama" and not ollama_model:
         raise ValueError("ai-mode=ollama requiere --ollama-model o OLLAMA_MODEL en .env")
 
+    dataset_sources: Dict[str, str] = {}
     if args.from_existing:
         print("Modo from-existing: usando JSON actuales (rats/tml) para derivar módulos.")
         schema = merge_existing_schema(output_dir)
@@ -1146,6 +1153,9 @@ def main() -> None:
                 )
             finally:
                 conn.close()
+            dataset_sources = {k: "oracle" for k in ("rats", "tml", AIRSOFT_DATASET_ID)}
+            for mid, _l, _p in AIRSOFT_MODULES:
+                dataset_sources[mid] = "oracle"
         elif args.db == "db2":
             required = ["DB2_HOST", "DB2_PORT", "DB2_DBNAME", "DB2_USER", "DB2_PASSWORD"]
             missing = [k for k in required if not env_data.get(k)]
@@ -1174,6 +1184,9 @@ def main() -> None:
                     conn.close()
                 except Exception:
                     pass
+            dataset_sources = {k: "db2" for k in ("rats", "tml", AIRSOFT_DATASET_ID)}
+            for mid, _l, _p in AIRSOFT_MODULES:
+                dataset_sources[mid] = "db2"
         else:
             required_oracle = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_SERVICE"]
             missing_oracle = [k for k in required_oracle if not env_data.get(k)]
@@ -1231,6 +1244,11 @@ def main() -> None:
             grouped["tml"] = base.get("tml", {})
             air = build_groups_airsoft_only(db2_schema)
             grouped.update(air)
+            dataset_sources["rats"] = "oracle"
+            dataset_sources["tml"] = "oracle"
+            dataset_sources[AIRSOFT_DATASET_ID] = "db2"
+            for mid, _l, _p in AIRSOFT_MODULES:
+                dataset_sources[mid] = "db2"
 
         if args.db != "mixed":
             grouped = build_groups(schema)
@@ -1242,6 +1260,7 @@ def main() -> None:
         ai_mode=ai_mode,
         ollama_url=ollama_url,
         ollama_model=ollama_model,
+        dataset_sources=dataset_sources if dataset_sources else None,
     )
 
     if not grouped.get("rats", {}).get("tables"):
