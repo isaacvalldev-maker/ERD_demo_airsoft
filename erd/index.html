@@ -3,23 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ERD · RATS / TML / Modules</title>
+    <title>ERD</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { background: #f1f5f9; font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; color: #0f172a; }
       #toolbar {
         position: fixed; top: 0; left: 0; right: 0; z-index: 100;
         background: white; border-bottom: 1px solid #e2e8f0;
-        padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+        padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 8px;
         box-shadow: 0 1px 4px rgba(2, 6, 23, 0.08);
       }
+      .toolbar-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; }
+      .toolbar-sep { flex: 1 1 auto; min-width: 8px; }
       #toolbar h1 { font-size: 16px; font-weight: 700; color: #0f172a; }
-      #source-tabs { display: flex; gap: 6px; }
-      #source-tabs button {
+      .tabset { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .tabset button,
+      .pill {
         border: 1px solid #cbd5e1; background: #f8fafc; color: #334155;
         padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+        white-space: nowrap;
       }
-      #source-tabs button.active { background: #4f46e5; color: white; border-color: #4338ca; }
+      .tabset button.active, .pill.active { background: #4f46e5; color: white; border-color: #4338ca; }
+      .pill.ghost { background: white; }
+      #airsoft-parts { display: none; width: 100%; padding-top: 2px; border-top: 1px solid #e2e8f0; }
+      #airsoft-parts .hint { color: #64748b; font-size: 11px; margin-right: 4px; }
+      #airsoft-parts .tabset { gap: 4px; }
+      #airsoft-parts .pill { font-size: 11.5px; padding: 5px 10px; }
+      #airsoft-parts .pill .tag { color: #94a3b8; margin-right: 3px; font-size: 10.5px; }
       #search {
         margin-left: 8px; width: 220px; border: 1px solid #cbd5e1;
         border-radius: 8px; padding: 6px 10px; font-size: 12px; outline: none;
@@ -31,16 +41,16 @@
       }
       #stats { color: #64748b; font-size: 12px; margin-left: 6px; }
       #hint { color: #94a3b8; font-size: 11px; margin-left: auto; }
-      #canvas { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; }
+      #canvas { position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
       svg { width: 100%; height: 100%; }
       .table-box { cursor: grab; }
       .table-box:active { cursor: grabbing; }
-      .table-title { font-size: 14px; font-weight: 700; fill: #fff; font-family: "Segoe UI", system-ui, sans-serif; }
+      .table-title { font-size: 16px; font-weight: 700; fill: #fff; font-family: "Segoe UI", system-ui, sans-serif; }
       .table-meta { font-size: 12px; fill: rgba(255, 255, 255, 0.8); text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
-      .col-name { font-size: 13px; font-family: "Segoe UI", system-ui, sans-serif; }
-      .col-type { font-size: 11px; fill: #94a3b8; text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
+      .col-name { font-size: 14px; font-family: "Segoe UI", system-ui, sans-serif; }
+      .col-type { font-size: 11.5px; fill: #94a3b8; text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
       #table-tooltip {
-        position: fixed; z-index: 220; max-width: 360px; pointer-events: none;
+        position: fixed; z-index: 220; max-width: 400px; pointer-events: none;
         background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 8px;
         padding: 10px 12px; font-size: 12px; line-height: 1.45;
         box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
@@ -61,12 +71,21 @@
   </head>
   <body>
     <div id="toolbar">
-      <h1>ERD</h1>
-      <div id="source-tabs"></div>
-      <input id="search" type="text" placeholder="Buscar tabla..." />
-      <button id="btn-fit" class="toolbar-btn" type="button">Fit</button>
-      <span id="stats"></span>
-      <span id="hint">Drag tablas · Scroll zoom · Drag fondo pan</span>
+      <div class="toolbar-row">
+        <h1>ERD</h1>
+        <div class="tabset" id="source-tabs"></div>
+        <div class="toolbar-sep"></div>
+        <input id="search" type="text" placeholder="Buscar tabla..." />
+        <button id="btn-fit" class="toolbar-btn" type="button">Fit</button>
+        <span id="stats"></span>
+        <span id="hint">Scroll zoom · Pan fondo / tablas</span>
+      </div>
+      <div id="airsoft-parts" aria-label="Bloques Airsoft">
+        <div class="toolbar-row" style="align-items: flex-start;">
+          <span class="hint">Bloques Airsoft (cada sub-vista se muestra a gran tamaño, independiente de la vista completa):</span>
+          <div class="tabset" id="airsoft-tabs"></div>
+        </div>
+      </div>
     </div>
 
     <div id="canvas">
@@ -88,7 +107,7 @@
     <div id="table-tooltip" role="tooltip">
       <strong></strong>
       <span id="table-tooltip-text"></span>
-      <span class="meta-badge">Descripcion basada en metadatos</span>
+      <span class="meta-badge">Descripcion basada en nombres de columna, PK/FK y comentarios Oracle</span>
     </div>
     <div id="error"></div>
 
@@ -99,26 +118,42 @@
       const viewport = document.getElementById("viewport");
       const edgesG = document.getElementById("edges");
       const tablesG = document.getElementById("tables");
+      const canvasEl = document.getElementById("canvas");
+      const toolbar = document.getElementById("toolbar");
       const statsEl = document.getElementById("stats");
       const errorEl = document.getElementById("error");
       const searchEl = document.getElementById("search");
       const tooltipEl = document.getElementById("table-tooltip");
       const tooltipTitleEl = tooltipEl.querySelector("strong");
       const tooltipTextEl = document.getElementById("table-tooltip-text");
+      const airsoftRow = document.getElementById("airsoft-parts");
+      const airsoftTabs = document.getElementById("airsoft-tabs");
+      const AIRSOFT_ROOT_ID = "airsoft_full";
 
-      const COL_W = 360;
-      const HDR_H = 46;
-      const ROW_H = 30;
+      const COL_W = 480;
+      const HDR_H = 50;
+      const ROW_H = 32;
       const WRAP_X = 8500;
 
       const pz = { x: 0, y: 0, scale: 1 };
       let datasets = [];
+      let airsoftGroup = null;
+      let lastAirsoftChoice = null;
       let activeDataset = null;
       let schema = null;
       let visibleTables = [];
       let visibleRefs = [];
       let positions = {};
       let tableHeights = {};
+
+      function syncCanvasTop() {
+        if (!canvasEl || !toolbar) return;
+        canvasEl.style.top = `${toolbar.offsetHeight}px`;
+      }
+
+      window.addEventListener("resize", () => {
+        syncCanvasTop();
+      });
 
       function showError(msg) {
         errorEl.style.display = "flex";
@@ -365,11 +400,11 @@
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: clr }));
           g.appendChild(mkSVG("rect", { x: 0, y: HDR_H - 10, width: COL_W, height: 10, fill: clr }));
 
-          const title = mkSVG("text", { x: 14, y: 29, class: "table-title" });
+          const title = mkSVG("text", { x: 14, y: 33, class: "table-title" });
           title.textContent = t;
           g.appendChild(title);
 
-          const cnt = mkSVG("text", { x: COL_W - 12, y: 29, class: "table-meta" });
+          const cnt = mkSVG("text", { x: COL_W - 12, y: 33, class: "table-meta" });
           cnt.textContent = `${cols.length} cols`;
           g.appendChild(cnt);
 
@@ -430,6 +465,42 @@
         statsEl.textContent = `${activeDatasetLabel()} · ${visibleTables.length} tablas · ${nCols} columnas · ${visibleRefs.length} relaciones`;
       }
 
+      function isAirsoftDatasetId(key) {
+        if (!key) return false;
+        if (key === AIRSOFT_ROOT_ID) return true;
+        if (!airsoftGroup) return false;
+        return (airsoftGroup.children || []).some((c) => c.id === key);
+      }
+
+      function setAirsoftRowVisible(visible) {
+        if (!airsoftRow) return;
+        airsoftRow.style.display = visible ? "block" : "none";
+        syncCanvasTop();
+      }
+
+      function setTopTabHighlight(datasetKey) {
+        const isAirsoft = isAirsoftDatasetId(datasetKey);
+        const tabRats = document.getElementById("tab-rats");
+        const tabTml = document.getElementById("tab-tml");
+        const tabAir = document.getElementById("tab-airsoft");
+        if (tabRats) {
+          tabRats.classList.toggle("active", datasetKey === "rats" && !isAirsoft);
+        }
+        if (tabTml) {
+          tabTml.classList.toggle("active", datasetKey === "tml" && !isAirsoft);
+        }
+        if (tabAir) {
+          tabAir.classList.toggle("active", isAirsoft);
+        }
+      }
+
+      function setAirsoftSubHighlight(datasetKey) {
+        if (!airsoftTabs) return;
+        airsoftTabs.querySelectorAll("button").forEach((b) => {
+          b.classList.toggle("active", b.dataset.src === datasetKey);
+        });
+      }
+
       function rerender() {
         hideTooltip();
         buildVisibleData();
@@ -442,13 +513,20 @@
 
       async function loadDataset(key) {
         activeDataset = key;
-        document.querySelectorAll("#source-tabs button").forEach((btn) => {
-          btn.classList.toggle("active", btn.dataset.src === key);
-        });
         const dataset = datasets.find((d) => d.id === key);
         if (!dataset) {
           throw new Error(`Dataset no encontrado: ${key}`);
         }
+        setTopTabHighlight(key);
+        const air = isAirsoftDatasetId(key);
+        setAirsoftRowVisible(air);
+        if (air) {
+          lastAirsoftChoice = key;
+          setAirsoftSubHighlight(key);
+        } else {
+          setAirsoftSubHighlight("");
+        }
+
         const res = await fetch(`./data/${dataset.file}`, { cache: "no-store" });
         if (!res.ok) {
           throw new Error(`No se pudo cargar ${dataset.file} (${res.status})`);
@@ -460,30 +538,133 @@
       searchEl.addEventListener("input", () => rerender());
       document.getElementById("btn-fit").addEventListener("click", fitAll);
 
+      function buildAirsoftModuleButton(label) {
+        const m = /module\s*(\d+)/i.exec(label || "");
+        const tag = m && m[1] ? `M${m[1]}` : "";
+        const head = /module\s*\d+\s*:\s*(.*)$/i.exec(label || "");
+        const rest = (head && head[1] ? head[1] : label).trim();
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "pill ghost";
+        btn.setAttribute("data-layer", "airsoft");
+        if (tag) {
+          const span = document.createElement("span");
+          span.className = "tag";
+          span.textContent = tag;
+          btn.appendChild(span);
+        }
+        btn.appendChild(document.createTextNode(rest || label));
+        return btn;
+      }
+
+      function initDatasetsV2(manifest) {
+        const top = Array.isArray(manifest.topLevel) ? manifest.topLevel : [];
+        const flat = [];
+        const tabs = document.getElementById("source-tabs");
+        tabs.innerHTML = "";
+        airsoftTabs.innerHTML = "";
+        airsoftGroup = null;
+        for (const item of top) {
+          if (item && item.id === "rats" && item.file) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "tab-rats";
+            btn.className = "pill";
+            btn.dataset.src = item.id;
+            btn.textContent = item.label || "RATS";
+            btn.setAttribute("data-layer", "top");
+            btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
+            tabs.appendChild(btn);
+            flat.push({ id: item.id, label: item.label, file: item.file });
+            continue;
+          }
+          if (item && item.id === "tml" && item.file) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "tab-tml";
+            btn.className = "pill";
+            btn.dataset.src = item.id;
+            btn.textContent = item.label || "TML";
+            btn.setAttribute("data-layer", "top");
+            btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
+            tabs.appendChild(btn);
+            flat.push({ id: item.id, label: item.label, file: item.file });
+            continue;
+          }
+          if (item && (item.kind === "airsoft_root" || item.id === AIRSOFT_ROOT_ID) && item.file) {
+            airsoftGroup = item;
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "tab-airsoft";
+            btn.className = "pill";
+            btn.dataset.src = item.id;
+            btn.textContent = item.label || "Airsoft";
+            btn.setAttribute("data-layer", "top");
+            btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
+            tabs.appendChild(btn);
+            flat.push({ id: item.id, label: item.label, file: item.file });
+            (item.children || []).forEach((ch) => {
+              if (!ch || !ch.id || !ch.file) return;
+              const sub = buildAirsoftModuleButton(ch.label);
+              sub.dataset.src = ch.id;
+              sub.addEventListener("click", () => loadDataset(ch.id).catch((e) => showError(e.message)));
+              airsoftTabs.appendChild(sub);
+              flat.push({ id: ch.id, label: ch.label, file: ch.file });
+            });
+            continue;
+          }
+        }
+        if (!flat.length) {
+          throw new Error("Manifest v2: no se pudo armar la navegación (topLevel vacío o inválido)");
+        }
+        datasets = flat;
+      }
+
+      function initDatasetsLegacy(list) {
+        if (!Array.isArray(list) || !list.length) {
+          throw new Error("Manifest vacío: genera data con build_erd_data_from_env.py");
+        }
+        airsoftGroup = null;
+        const tabs = document.getElementById("source-tabs");
+        tabs.innerHTML = "";
+        if (airsoftTabs) airsoftTabs.innerHTML = "";
+        if (airsoftRow) airsoftRow.style.display = "none";
+        list.forEach((d, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "pill";
+          if (d.id === "rats") btn.id = "tab-rats";
+          if (d.id === "tml") btn.id = "tab-tml";
+          if (d.id === AIRSOFT_ROOT_ID) btn.id = "tab-airsoft";
+          btn.dataset.src = d.id;
+          btn.textContent = d.label;
+          btn.setAttribute("data-layer", "top");
+          if (idx === 0) btn.classList.add("active");
+          btn.addEventListener("click", () => loadDataset(d.id).catch((err) => showError(err.message)));
+          tabs.appendChild(btn);
+        });
+        datasets = list;
+      }
+
       async function initDatasets() {
         const res = await fetch(MANIFEST_FILE, { cache: "no-store" });
         if (!res.ok) {
           throw new Error(`No se pudo cargar ${MANIFEST_FILE} (${res.status})`);
         }
-        datasets = await res.json();
-        if (!Array.isArray(datasets) || !datasets.length) {
-          throw new Error("Manifest vacío: genera data con build_erd_data_from_env.py");
+        const raw = await res.json();
+        if (raw && typeof raw === "object" && !Array.isArray(raw) && raw.version === 2) {
+          initDatasetsV2(raw);
+        } else if (Array.isArray(raw)) {
+          initDatasetsLegacy(raw);
+        } else {
+          throw new Error("Formato de datasets.manifest.json desconocido. Regenere con build_erd_data_from_env.py");
         }
-
-        const tabs = document.getElementById("source-tabs");
-        tabs.innerHTML = "";
-        datasets.forEach((d, idx) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.dataset.src = d.id;
-          btn.textContent = d.label;
-          if (idx === 0) btn.classList.add("active");
-          btn.addEventListener("click", () => loadDataset(d.id).catch((err) => showError(err.message)));
-          tabs.appendChild(btn);
-        });
-
-        activeDataset = datasets[0].id;
-        await loadDataset(activeDataset);
+        setAirsoftRowVisible(false);
+        syncCanvasTop();
+        const boot =
+          (lastAirsoftChoice && datasets.find((d) => d.id === lastAirsoftChoice) && lastAirsoftChoice) ||
+          "rats";
+        await loadDataset(datasets.some((d) => d.id === boot) ? boot : datasets[0].id);
       }
 
       let panning = false;

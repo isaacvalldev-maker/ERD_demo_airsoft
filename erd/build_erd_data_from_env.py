@@ -5,8 +5,9 @@ Generate ERD dataset files from Oracle credentials in .env.
 Outputs:
 - rats.schema.json
 - tml.schema.json
-- Module datasets (Module 4..8)
-- datasets.manifest.json (for dynamic tabs in the viewer)
+- airsoft_full.schema.json (todos los prefijos Airsoft, vista grande)
+- airsoft_module*.schema.json (cada bloque 4..8)
+- datasets.manifest.json (navegacion: RATS · TML · Airsoft + subpestanas)
 """
 
 from __future__ import annotations
@@ -24,6 +25,13 @@ try:
     import oracledb
 except ImportError:
     oracledb = None
+
+AIRSOFT_DATASET_ID = "airsoft_full"
+AIRSOFT_FILE = f"{AIRSOFT_DATASET_ID}.schema.json"
+AIRSOFT_TOP_LABEL = "Airsoft (vista completa)"
+
+# Bump cuando cambia el template de explicacion (invalida .ai_explanations_cache.json antiguo).
+AI_EXPL_CACHE_VER = 2
 
 AIRSOFT_MODULES: List[Tuple[str, str, Tuple[str, ...]]] = [
     (
@@ -261,7 +269,9 @@ def generate_ai_table_explanation(
     table_comment: Optional[str],
 ) -> str:
     """
-    Create a deterministic metadata-only table description.
+    Descripcion **determinista** orientada a "para que sirve", usando solo
+    nombres de columna, PK, FK, conteos y comentario Oracle (si existe).
+    No afirma procesos de negocio no respaldados por comentarios/metadata.
     """
     short = table_short_name(table_name)
     n_cols = len(columns)
@@ -284,18 +294,36 @@ def generate_ai_table_explanation(
     out_text = ", ".join(to_tables) if to_tables else "ninguna"
     in_text = ", ".join(from_tables) if from_tables else "ninguna"
 
-    if table_comment:
-        comment_text = f"Comentario Oracle: {table_comment.strip()}."
+    if table_comment and table_comment.strip():
+        base_purpose = (
+            f"Segun comentario Oracle, esta entidad almacena o describe: {table_comment.strip()}. "
+        )
     else:
-        comment_text = "Comentario Oracle: no disponible."
+        base_purpose = (
+            f"Con los datos disponibles (sin comentario de tabla en Oracle), "
+            f"`{short}` parece un repositorio de {n_cols} atributos sobre la entidad nombrada en la tabla, "
+            f"con {required_count} de ellos requeridos y el resto opcionales. "
+        )
 
-    return (
-        f"Tabla `{short}` con {n_cols} columnas ({required_count} requeridas). "
-        f"PK: {pk_text}. "
-        f"Relaciones: {fk_out} salientes hacia [{out_text}] y {fk_in} entrantes desde [{in_text}]. "
-        f"Campos clave detectados: {hint_text}. "
-        f"{comment_text}"
+    links = (
+        f"Conecta con otras entidades: {fk_out} salida(s) hacia [{out_text}] y "
+        f"{fk_in} entrada(s) desde [{in_text}]. "
     )
+
+    identity = (
+        f"Identificacion/unicidad: PK [{pk_text}]. "
+    )
+
+    hints = (
+        f"Nombres de columna sugeridos como relevantes: {hint_text} "
+        f"(inferencia heuristica, no un proceso de negocio). "
+    )
+
+    disclaimer = (
+        "Esto se deduce de metadatos; si falta comentario Oracle, revise PK/FK y nombres de columna en el ERD."
+    )
+
+    return " ".join([base_purpose, links, identity, hints, disclaimer])
 
 
 def generate_ollama_table_explanation(
@@ -470,7 +498,7 @@ def ensure_ai_explanations(
     for table_name in payload.get("tables", []):
         if ai.get(table_name):
             continue
-        cache_key = f"{dataset_id}:{table_name}"
+        cache_key = f"v{AI_EXPL_CACHE_VER}:{dataset_id}:{table_name}"
         if ai_cache.get(cache_key):
             ai[table_name] = ai_cache[cache_key]
             continue
@@ -526,6 +554,13 @@ def build_groups(schema: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         results[group_key] = group_from_tables(schema, group_key, tables)
     for module_id, _label, _prefixes in AIRSOFT_MODULES:
         results[module_id] = group_from_tables(schema, module_id, airsoft_tables[module_id])
+    all_air: Set[str] = set()
+    for _mid, tlist in airsoft_tables.items():
+        all_air.update(tlist)
+    if all_air:
+        results[AIRSOFT_DATASET_ID] = group_from_tables(
+            schema, AIRSOFT_DATASET_ID, sorted(all_air)
+        )
     return results
 
 
@@ -590,6 +625,8 @@ def manifest_label(dataset_id: str) -> str:
         return "RATS"
     if dataset_id == "tml":
         return "TML"
+    if dataset_id == AIRSOFT_DATASET_ID:
+        return AIRSOFT_TOP_LABEL
     for module_id, label, _prefixes in AIRSOFT_MODULES:
         if module_id == dataset_id:
             return label
@@ -604,8 +641,11 @@ def write_outputs(
     ollama_url: str = "http://127.0.0.1:11434",
     ollama_model: str = "",
 ) -> None:
-    ordered_ids = ["rats", "tml"] + [module_id for module_id, _label, _prefixes in AIRSOFT_MODULES]
-    manifest: List[Dict[str, Any]] = []
+    # Compat: antes filtrabamos pestañas vacias; ahora el manifest v2 siempre lista módulos.
+    _ = include_empty_tabs
+    ordered_ids = (
+        ["rats", "tml", AIRSOFT_DATASET_ID] + [module_id for module_id, _label, _prefixes in AIRSOFT_MODULES]
+    )
     cache_path = output_dir / ".ai_explanations_cache.json"
     if cache_path.exists():
         try:
@@ -615,6 +655,9 @@ def write_outputs(
     else:
         ai_cache = {}
 
+    # Siempre generamos un JSON por id (aunque tenga 0 tablas) para que el visor
+    # y el manifest puedan referenciar modulos vacios sin perder el archivo.
+    written: Dict[str, Dict[str, Any]] = {}
     for dataset_id in ordered_ids:
         payload = grouped.get(
             dataset_id,
@@ -641,20 +684,68 @@ def write_outputs(
         out_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         print(f"OK {out_path.name}: {len(payload['tables'])} tablas, {len(payload['refs'])} relaciones")
 
-        if include_empty_tabs or payload["tables"]:
-            manifest.append(
+        written[dataset_id] = {
+            "id": dataset_id,
+            "label": manifest_label(dataset_id),
+            "file": out_path.name,
+            "tables": len(payload["tables"]),
+            "relations": len(payload["refs"]),
+        }
+
+    by_id: Dict[str, Dict[str, Any]] = dict(written)
+    # Publicar los 5 modulos 4..8 aunque alguno venga con 0 tablas: el JSON existe y el manifest
+    # conserva el conteo real (0) para que el UI muestre la fila completa.
+    airsoft_children: List[Dict[str, Any]] = []
+    for module_id, _label, _prefixes in AIRSOFT_MODULES:
+        w = by_id.get(module_id)
+        if not w:
+            continue
+        airsoft_children.append(
+            {
+                "id": w["id"],
+                "label": w["label"],
+                "file": w["file"],
+                "kind": "airsoft_module",
+                "tables": w.get("tables"),
+                "relations": w.get("relations"),
+            }
+        )
+    top_level: List[Dict[str, Any]] = []
+    for key in ("rats", "tml"):
+        if key in by_id:
+            w = by_id[key]
+            top_level.append(
                 {
-                    "id": dataset_id,
-                    "label": manifest_label(dataset_id),
-                    "file": out_path.name,
-                    "tables": len(payload["tables"]),
-                    "relations": len(payload["refs"]),
+                    "id": w["id"],
+                    "label": w["label"],
+                    "file": w["file"],
+                    "kind": "base",
+                    "tables": w.get("tables"),
+                    "relations": w.get("relations"),
                 }
             )
+    if AIRSOFT_DATASET_ID in by_id:
+        w = by_id[AIRSOFT_DATASET_ID]
+        top_level.append(
+            {
+                "id": w["id"],
+                "label": w["label"],
+                "file": w["file"],
+                "kind": "airsoft_root",
+                "children": airsoft_children,
+                "tables": w.get("tables"),
+                "relations": w.get("relations"),
+            }
+        )
+
+    manifest_obj: Dict[str, Any] = {
+        "version": 2,
+        "topLevel": top_level,
+    }
 
     manifest_path = output_dir / "datasets.manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"OK {manifest_path.name}: {len(manifest)} pestañas")
+    manifest_path.write_text(json.dumps(manifest_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"OK {manifest_path.name}: topLevel={len(manifest_obj['topLevel'])} (manifest v2)")
     cache_path.write_text(json.dumps(ai_cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -754,6 +845,19 @@ def main() -> None:
                     "ai_table_explanations": {},
                 },
             )
+        grouped[AIRSOFT_DATASET_ID] = derived.get(
+            AIRSOFT_DATASET_ID,
+            {
+                "name": AIRSOFT_DATASET_ID.upper(),
+                "tables": [],
+                "columns": {},
+                "pks": {},
+                "uqs": {},
+                "refs": [],
+                "table_comments": {},
+                "ai_table_explanations": {},
+            },
+        )
     else:
         if not env_data:
             raise FileNotFoundError(f"No existe el archivo .env: {env_path}")
