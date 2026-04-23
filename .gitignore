@@ -1,1 +1,3 @@
 erd/.env
+__pycache__/
+*.pyc
