@@ -112,7 +112,19 @@
     <div id="error"></div>
 
     <script>
-      const MANIFEST_FILE = "./data/datasets.manifest.json";
+      /** Ruta al manifest, siempre relativa a esta pagina (evita rutas rotas con redirects). */
+      function getManifestUrl(cacheBust) {
+        const u = new URL("data/datasets.manifest.json", window.location.href);
+        if (cacheBust) u.searchParams.set("t", String(Date.now()));
+        else u.searchParams.set("v", "2");
+        return u.toString();
+      }
+
+      function isManifestV2(raw) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+        const ver = Number(raw.version);
+        return ver === 2 && Array.isArray(raw.topLevel);
+      }
 
       const svg = document.getElementById("svg");
       const viewport = document.getElementById("viewport");
@@ -650,17 +662,38 @@
       }
 
       async function initDatasets() {
-        const res = await fetch(MANIFEST_FILE, { cache: "no-store" });
-        if (!res.ok) {
-          throw new Error(`No se pudo cargar ${MANIFEST_FILE} (${res.status})`);
+        const tryLoad = async (bust) => {
+          const url = getManifestUrl(bust);
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) {
+            throw new Error(
+              `No se pudo cargar el manifest (${res.status}). ` +
+                `Abre el ERD con la URL que termina en /erd/index.html y recarga con Cmd+Shift+R.`
+            );
+          }
+          return res.json();
+        };
+
+        let raw = await tryLoad(false);
+        if (Array.isArray(raw) && raw.length === 0) {
+          raw = await tryLoad(true);
         }
-        const raw = await res.json();
-        if (raw && typeof raw === "object" && !Array.isArray(raw) && raw.version === 2) {
+
+        if (isManifestV2(raw)) {
           initDatasetsV2(raw);
         } else if (Array.isArray(raw)) {
+          if (raw.length === 0) {
+            throw new Error(
+              "El manifest llegó vacío ([]). Suele ser caché del navegador: recarga forzada (Cmd+Shift+R) " +
+                "o abre en ventana privada. No hace falta acceso a Oracle para ver el ERD: los JSON ya van en el repo."
+            );
+          }
           initDatasetsLegacy(raw);
         } else {
-          throw new Error("Formato de datasets.manifest.json desconocido. Regenere con build_erd_data_from_env.py");
+          throw new Error(
+            "Formato de datasets.manifest.json desconocido. Sube `erd/data/datasets.manifest.json` (v2) " +
+              "o ejecuta en local: python3 erd/build_erd_data_from_env.py --from-existing"
+          );
         }
         setAirsoftRowVisible(false);
         syncCanvasTop();
