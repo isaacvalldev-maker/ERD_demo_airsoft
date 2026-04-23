@@ -25,11 +25,11 @@
       }
       .tabset button.active, .pill.active { background: #4f46e5; color: white; border-color: #4338ca; }
       .pill.ghost { background: white; }
-      #airsoft-parts { display: none; width: 100%; padding-top: 2px; border-top: 1px solid #e2e8f0; }
-      #airsoft-parts .hint { color: #64748b; font-size: 11px; margin-right: 4px; }
-      #airsoft-parts .tabset { gap: 4px; }
-      #airsoft-parts .pill { font-size: 11.5px; padding: 5px 10px; }
-      #airsoft-parts .pill .tag { color: #94a3b8; margin-right: 3px; font-size: 10.5px; }
+      #airsoft-parts { display: none; width: 100%; padding-top: 6px; border-top: 1px solid #e2e8f0; }
+      #airsoft-parts .airsoft-filter-label { color: #64748b; font-size: 11px; font-weight: 600; margin-right: 8px; align-self: center; }
+      #airsoft-parts .tabset { gap: 5px; flex: 1; flex-wrap: wrap; }
+      #airsoft-parts .pill { font-size: 12px; padding: 6px 12px; min-width: 2.5rem; }
+      #airsoft-parts .pill.filter-todo { font-weight: 600; }
       #search {
         margin-left: 8px; width: 220px; border: 1px solid #cbd5e1;
         border-radius: 8px; padding: 6px 10px; font-size: 12px; outline: none;
@@ -80,9 +80,9 @@
         <span id="stats"></span>
         <span id="hint">Scroll zoom · Pan fondo / tablas</span>
       </div>
-      <div id="airsoft-parts" aria-label="Bloques Airsoft">
-        <div class="toolbar-row" style="align-items: flex-start;">
-          <span class="hint">Bloques Airsoft (cada sub-vista se muestra a gran tamaño, independiente de la vista completa):</span>
+      <div id="airsoft-parts" aria-label="Filtro de módulos Airsoft">
+        <div class="toolbar-row" style="align-items: center;">
+          <span class="airsoft-filter-label">Módulo</span>
           <div class="tabset" id="airsoft-tabs"></div>
         </div>
       </div>
@@ -538,22 +538,19 @@
       searchEl.addEventListener("input", () => rerender());
       document.getElementById("btn-fit").addEventListener("click", fitAll);
 
-      function buildAirsoftModuleButton(label) {
+      function modulePillText(label) {
         const m = /module\s*(\d+)/i.exec(label || "");
-        const tag = m && m[1] ? `M${m[1]}` : "";
-        const head = /module\s*\d+\s*:\s*(.*)$/i.exec(label || "");
-        const rest = (head && head[1] ? head[1] : label).trim();
+        return m && m[1] ? `M${m[1]}` : (label || "?").slice(0, 8);
+      }
+
+      function buildFilterPill({ id, label, isTodo }) {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "pill ghost";
+        btn.className = isTodo ? "pill filter-todo" : "pill ghost";
         btn.setAttribute("data-layer", "airsoft");
-        if (tag) {
-          const span = document.createElement("span");
-          span.className = "tag";
-          span.textContent = tag;
-          btn.appendChild(span);
-        }
-        btn.appendChild(document.createTextNode(rest || label));
+        btn.dataset.src = id;
+        btn.textContent = isTodo ? "Todo" : modulePillText(label);
+        if (!isTodo && label) btn.title = label;
         return btn;
       }
 
@@ -598,18 +595,24 @@
             btn.id = "tab-airsoft";
             btn.className = "pill";
             btn.dataset.src = item.id;
-            btn.textContent = item.label || "Airsoft";
+            btn.textContent = "Airsoft";
             btn.setAttribute("data-layer", "top");
             btn.addEventListener("click", () => loadDataset(item.id).catch((err) => showError(err.message)));
             tabs.appendChild(btn);
-            flat.push({ id: item.id, label: item.label, file: item.file });
+            flat.push({ id: item.id, label: "Airsoft · Todo", file: item.file });
+            const todoPill = buildFilterPill({ id: item.id, label: item.label, isTodo: true });
+            todoPill.addEventListener("click", () => loadDataset(item.id).catch((e) => showError(e.message)));
+            airsoftTabs.appendChild(todoPill);
             (item.children || []).forEach((ch) => {
               if (!ch || !ch.id || !ch.file) return;
-              const sub = buildAirsoftModuleButton(ch.label);
-              sub.dataset.src = ch.id;
+              const sub = buildFilterPill({ id: ch.id, label: ch.label, isTodo: false });
               sub.addEventListener("click", () => loadDataset(ch.id).catch((e) => showError(e.message)));
               airsoftTabs.appendChild(sub);
-              flat.push({ id: ch.id, label: ch.label, file: ch.file });
+              flat.push({
+                id: ch.id,
+                label: `Airsoft · ${modulePillText(ch.label)}`,
+                file: ch.file,
+              });
             });
             continue;
           }
