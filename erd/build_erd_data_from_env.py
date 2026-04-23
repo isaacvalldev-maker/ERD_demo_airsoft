@@ -42,27 +42,27 @@ AI_EXPL_CACHE_VER = 2
 AIRSOFT_MODULES: List[Tuple[str, str, Tuple[str, ...]]] = [
     (
         "airsoft_module4_non_routine",
-        "Module 4: Non-Routine Data Base",
+        "Non-routine-data base",
         ("PWOS", "AER_PWOS", "PTRD", "TRD", "WOS", "RAT_PWOS"),
     ),
     (
         "airsoft_module5_turnover_book",
-        "Module 5: Turnover Book",
+        "Turnover book",
         ("TBL", "TBK", "TURN", "BOOK"),
     ),
     (
         "airsoft_module6_digitalization_docmat",
-        "Module 6: Digitalization (DOCMAT)",
+        "Digitalization (DOCMAT)",
         ("DOC", "DOCMAT", "DCM", "DMAT", "SCAN"),
     ),
     (
         "airsoft_module7_contract_quotation",
-        "Module 7: Contract & Quotation",
+        "Contract and quotation",
         ("CAP", "CERT", "CON", "COT", "QUO", "QUOTE"),
     ),
     (
         "airsoft_module8_invoice_systems",
-        "Module 8: Invoice Systems",
+        "Invoice system",
         ("FIN", "INV", "MIS", "PMIS", "PFIN", "INVOICE", "FACT"),
     ),
 ]

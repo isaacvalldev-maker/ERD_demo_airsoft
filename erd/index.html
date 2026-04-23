@@ -572,8 +572,7 @@
       document.getElementById("btn-fit").addEventListener("click", fitAll);
 
       function modulePillText(label) {
-        const m = /module\s*(\d+)/i.exec(label || "");
-        return m && m[1] ? `M${m[1]}` : (label || "?").slice(0, 8);
+        return (label || "").trim() || "?";
       }
 
       function buildFilterPill({ id, label, isTodo }) {
