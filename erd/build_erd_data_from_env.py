@@ -37,7 +37,7 @@ AIRSOFT_FILE = f"{AIRSOFT_DATASET_ID}.schema.json"
 AIRSOFT_TOP_LABEL = "Airsoft (vista completa)"
 
 # Bump cuando cambia el template de explicacion (invalida .ai_explanations_cache.json antiguo).
-AI_EXPL_CACHE_VER = 2
+AI_EXPL_CACHE_VER = 3
 
 AIRSOFT_MODULES: List[Tuple[str, str, Tuple[str, ...]]] = [
     (
@@ -517,15 +517,10 @@ def generate_ai_table_explanation(
     in_text = ", ".join(from_tables) if from_tables else "ninguna"
 
     if table_comment and table_comment.strip():
-        base_purpose = (
-            f"Segun comentario Oracle, esta entidad almacena o describe: {table_comment.strip()}. "
-        )
+        base_purpose = f"{table_comment.strip()} "
     else:
-        base_purpose = (
-            f"Con los datos disponibles (sin comentario de tabla en Oracle), "
-            f"`{short}` parece un repositorio de {n_cols} atributos sobre la entidad nombrada en la tabla, "
-            f"con {required_count} de ellos requeridos y el resto opcionales. "
-        )
+        # Sin comentario no inferimos finalidad: solo hechos observables.
+        base_purpose = ""
 
     links = (
         f"Conecta con otras entidades: {fk_out} salida(s) hacia [{out_text}] y "
@@ -536,16 +531,13 @@ def generate_ai_table_explanation(
         f"Identificacion/unicidad: PK [{pk_text}]. "
     )
 
-    hints = (
-        f"Nombres de columna sugeridos como relevantes: {hint_text} "
-        f"(inferencia heuristica, no un proceso de negocio). "
-    )
+    hints = f"Nombres de columna destacados por nombre: {hint_text}. "
 
-    disclaimer = (
-        "Esto se deduce de metadatos; si falta comentario Oracle, revise PK/FK y nombres de columna en el ERD."
-    )
+    if base_purpose:
+        # Si hay comentario, lo tratamos como fuente de propósito.
+        return " ".join([base_purpose, links, identity, hints]).strip()
 
-    return " ".join([base_purpose, links, identity, hints, disclaimer])
+    return " ".join([links, identity, hints]).strip()
 
 
 def generate_ollama_table_explanation(
@@ -718,8 +710,10 @@ def ensure_ai_explanations(
         refs_by_to.setdefault(r["to_table"], []).append(r)
 
     for table_name in payload.get("tables", []):
-        if ai.get(table_name):
-            continue
+        # Heuristic mode is deterministic: always refresh so wording/template changes apply
+        # and stale "hedged" text doesn't persist in committed JSON.
+        if ai_mode != "ollama" and ai.get(table_name):
+            ai.pop(table_name, None)
         cache_key = f"v{AI_EXPL_CACHE_VER}:{dataset_id}:{table_name}"
         if ai_cache.get(cache_key):
             ai[table_name] = ai_cache[cache_key]
