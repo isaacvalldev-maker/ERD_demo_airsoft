@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ERD · RATS / TML / Modules</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: #f1f5f9; font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; color: #0f172a; }
+      #toolbar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+        background: white; border-bottom: 1px solid #e2e8f0;
+        padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+        box-shadow: 0 1px 4px rgba(2, 6, 23, 0.08);
+      }
+      #toolbar h1 { font-size: 16px; font-weight: 700; color: #0f172a; }
+      #source-tabs { display: flex; gap: 6px; }
+      #source-tabs button {
+        border: 1px solid #cbd5e1; background: #f8fafc; color: #334155;
+        padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+      }
+      #source-tabs button.active { background: #4f46e5; color: white; border-color: #4338ca; }
+      #search {
+        margin-left: 8px; width: 220px; border: 1px solid #cbd5e1;
+        border-radius: 8px; padding: 6px 10px; font-size: 12px; outline: none;
+      }
+      #search:focus { border-color: #4f46e5; }
+      .toolbar-btn {
+        border: 1px solid #cbd5e1; background: white; color: #334155;
+        border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+      }
+      #stats { color: #64748b; font-size: 12px; margin-left: 6px; }
+      #hint { color: #94a3b8; font-size: 11px; margin-left: auto; }
+      #canvas { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; }
+      svg { width: 100%; height: 100%; }
+      .table-box { cursor: grab; }
+      .table-box:active { cursor: grabbing; }
+      .table-title { font-size: 14px; font-weight: 700; fill: #fff; font-family: "Segoe UI", system-ui, sans-serif; }
+      .table-meta { font-size: 12px; fill: rgba(255, 255, 255, 0.8); text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
+      .col-name { font-size: 13px; font-family: "Segoe UI", system-ui, sans-serif; }
+      .col-type { font-size: 11px; fill: #94a3b8; text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
+      #table-tooltip {
+        position: fixed; z-index: 220; max-width: 360px; pointer-events: none;
+        background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 8px;
+        padding: 10px 12px; font-size: 12px; line-height: 1.45;
+        box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
+        opacity: 0; visibility: hidden; transition: opacity 0.12s ease-in-out;
+      }
+      #table-tooltip.visible { opacity: 1; visibility: visible; }
+      #table-tooltip strong { color: #93c5fd; display: block; margin-bottom: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+      #table-tooltip .meta-badge {
+        display: inline-block; margin-top: 8px; padding: 2px 8px;
+        border: 1px solid #334155; border-radius: 999px;
+        color: #93c5fd; font-size: 10px; letter-spacing: 0.02em;
+      }
+      #error {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+        background: #0f172ae0; color: #fff; padding: 20px; text-align: center; z-index: 200;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <h1>ERD</h1>
+      <div id="source-tabs"></div>
+      <input id="search" type="text" placeholder="Buscar tabla..." />
+      <button id="btn-fit" class="toolbar-btn" type="button">Fit</button>
+      <span id="stats"></span>
+      <span id="hint">Drag tablas · Scroll zoom · Drag fondo pan</span>
+    </div>
+
+    <div id="canvas">
+      <svg id="svg" aria-label="ERD">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#6366f1" opacity="0.8"></path>
+          </marker>
+          <filter id="shadow">
+            <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#00000025"></feDropShadow>
+          </filter>
+        </defs>
+        <g id="viewport">
+          <g id="edges"></g>
+          <g id="tables"></g>
+        </g>
+      </svg>
+    </div>
+    <div id="table-tooltip" role="tooltip">
+      <strong></strong>
+      <span id="table-tooltip-text"></span>
+      <span class="meta-badge">Descripcion basada en metadatos</span>
+    </div>
+    <div id="error"></div>
+
+    <script>
+      const MANIFEST_FILE = "./data/datasets.manifest.json";
+
+      const svg = document.getElementById("svg");
+      const viewport = document.getElementById("viewport");
+      const edgesG = document.getElementById("edges");
+      const tablesG = document.getElementById("tables");
+      const statsEl = document.getElementById("stats");
+      const errorEl = document.getElementById("error");
+      const searchEl = document.getElementById("search");
+      const tooltipEl = document.getElementById("table-tooltip");
+      const tooltipTitleEl = tooltipEl.querySelector("strong");
+      const tooltipTextEl = document.getElementById("table-tooltip-text");
+
+      const COL_W = 360;
+      const HDR_H = 46;
+      const ROW_H = 30;
+      const WRAP_X = 8500;
+
+      const pz = { x: 0, y: 0, scale: 1 };
+      let datasets = [];
+      let activeDataset = null;
+      let schema = null;
+      let visibleTables = [];
+      let visibleRefs = [];
+      let positions = {};
+      let tableHeights = {};
+
+      function showError(msg) {
+        errorEl.style.display = "flex";
+        errorEl.textContent = msg;
+      }
+
+      function moveTooltip(clientX, clientY) {
+        const pad = 14;
+        let x = clientX + pad;
+        let y = clientY + pad;
+        const rect = tooltipEl.getBoundingClientRect();
+        if (x + rect.width > window.innerWidth - 8) x = clientX - rect.width - pad;
+        if (y + rect.height > window.innerHeight - 8) y = clientY - rect.height - pad;
+        tooltipEl.style.left = `${x}px`;
+        tooltipEl.style.top = `${y}px`;
+      }
+
+      function showTooltip(tableName, text, clientX, clientY) {
+        tooltipTitleEl.textContent = tableName;
+        tooltipTextEl.textContent = text;
+        tooltipEl.classList.add("visible");
+        moveTooltip(clientX, clientY);
+      }
+
+      function hideTooltip() {
+        tooltipEl.classList.remove("visible");
+      }
+
+      function applyTransform() {
+        viewport.setAttribute("transform", `translate(${pz.x},${pz.y}) scale(${pz.scale})`);
+      }
+
+      function getTableColor(tableName) {
+        const owner = tableName.includes(".") ? tableName.split(".")[0] : tableName.split("_")[0];
+        const palette = {
+          RAT: "#4f46e5",
+          CAP: "#9333ea",
+          CERT: "#0e7490",
+          EMP: "#059669",
+          PLA: "#d97706",
+          TML: "#4f46e5",
+          MDM: "#0f766e",
+        };
+        return palette[owner] || "#475569";
+      }
+
+      function getColY(tableName, colName) {
+        const cols = schema.columns[tableName] || [];
+        const idx = cols.findIndex((c) => c.name === colName);
+        return idx >= 0 ? HDR_H + idx * ROW_H + ROW_H / 2 + 4 : HDR_H / 2;
+      }
+
+      function buildVisibleData() {
+        const q = searchEl.value.trim().toLowerCase();
+        visibleTables = schema.tables.filter((t) => !q || t.toLowerCase().includes(q));
+        const keep = new Set(visibleTables);
+        visibleRefs = (schema.refs || []).filter((r) => keep.has(r.from_table) && keep.has(r.to_table));
+      }
+
+      function computeLayout() {
+        tableHeights = {};
+        visibleTables.forEach((t) => {
+          const cols = schema.columns[t] || [];
+          tableHeights[t] = HDR_H + cols.length * ROW_H + 10;
+        });
+
+        const adj = {};
+        visibleTables.forEach((t) => {
+          adj[t] = new Set();
+        });
+        visibleRefs.forEach((r) => {
+          if (adj[r.from_table] && adj[r.to_table]) {
+            adj[r.from_table].add(r.to_table);
+            adj[r.to_table].add(r.from_table);
+          }
+        });
+
+        const visited = new Set();
+        const components = [];
+        visibleTables.forEach((t) => {
+          if (visited.has(t)) return;
+          const comp = [];
+          const q = [t];
+          visited.add(t);
+          while (q.length) {
+            const n = q.shift();
+            comp.push(n);
+            adj[n].forEach((nb) => {
+              if (!visited.has(nb)) {
+                visited.add(nb);
+                q.push(nb);
+              }
+            });
+          }
+          components.push(comp);
+        });
+
+        const connected = components.filter((c) => c.length > 1).sort((a, b) => b.length - a.length);
+        const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
+
+        positions = {};
+        let ox = 80;
+        let oy = 70;
+        let rowMaxH = 0;
+        const CW = COL_W + 120;
+
+        connected.forEach((comp) => {
+          const hub = comp.reduce((best, cur) => (adj[cur].size > adj[best].size ? cur : best), comp[0]);
+          const compSet = new Set(comp);
+          const dist = { [hub]: 0 };
+          const q = [hub];
+          while (q.length) {
+            const cur = q.shift();
+            adj[cur].forEach((nb) => {
+              if (compSet.has(nb) && !(nb in dist)) {
+                dist[nb] = dist[cur] + 1;
+                q.push(nb);
+              }
+            });
+          }
+
+          const rings = [];
+          comp.forEach((t) => {
+            const d = dist[t] || 0;
+            while (rings.length <= d) rings.push([]);
+            rings[d].push(t);
+          });
+          rings.forEach((r) => r.sort());
+
+          const radii = [0];
+          for (let i = 1; i < rings.length; i += 1) {
+            const n = rings[i].length;
+            const minR = (n * CW) / (2 * Math.PI);
+            radii.push(Math.max(minR, radii[i - 1] + CW * 1.2));
+          }
+          const maxR = radii[radii.length - 1] + COL_W;
+          const cx = ox + maxR;
+          const cy = oy + maxR + 80;
+
+          rings.forEach((ring, ri) => {
+            ring.forEach((t, i) => {
+              const angle = ri === 0 ? -Math.PI / 2 : (2 * Math.PI * i) / ring.length - Math.PI / 2;
+              positions[t] = {
+                x: Math.round(cx + radii[ri] * Math.cos(angle)),
+                y: Math.round(cy + radii[ri] * Math.sin(angle)),
+              };
+            });
+          });
+
+          const compW = maxR * 2 + COL_W + 220;
+          const compH = maxR * 2 + 220;
+          rowMaxH = Math.max(rowMaxH, compH);
+          ox += compW;
+          if (ox > WRAP_X) {
+            ox = 80;
+            oy += rowMaxH + 240;
+            rowMaxH = 0;
+          }
+        });
+
+        const cols = 6;
+        let isoY = oy + rowMaxH + 360;
+        if (Object.keys(positions).length > 0) {
+          isoY = Math.max(...Object.values(positions).map((p) => p.y)) + 420;
+        }
+        isolated.forEach((t, idx) => {
+          positions[t] = {
+            x: 80 + (idx % cols) * (COL_W + 90),
+            y: isoY + Math.floor(idx / cols) * 390,
+          };
+        });
+      }
+
+      function mkSVG(tag, attrs) {
+        const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+        return el;
+      }
+
+      function renderEdges() {
+        edgesG.innerHTML = "";
+        visibleRefs.forEach((r) => {
+          const fp = positions[r.from_table];
+          const tp = positions[r.to_table];
+          if (!fp || !tp) return;
+          const fy = fp.y + getColY(r.from_table, r.from_col);
+          const ty = tp.y + getColY(r.to_table, r.to_col);
+          let fx;
+          let tx;
+          let cp1;
+          let cp2;
+
+          if (fp.x > tp.x + COL_W) {
+            fx = fp.x;
+            tx = tp.x + COL_W;
+            cp1 = fx - 90;
+            cp2 = tx + 90;
+          } else if (tp.x > fp.x + COL_W) {
+            fx = fp.x + COL_W;
+            tx = tp.x;
+            cp1 = fx + 90;
+            cp2 = tx - 90;
+          } else {
+            fx = fp.x;
+            tx = tp.x;
+            cp1 = fx - 120;
+            cp2 = tx - 120;
+          }
+
+          const d = `M${fx},${fy} C${cp1},${fy} ${cp2},${ty} ${tx},${ty}`;
+          edgesG.appendChild(
+            mkSVG("path", {
+              d,
+              fill: "none",
+              stroke: "#6366f1",
+              "stroke-width": 2,
+              "stroke-opacity": 0.55,
+              "marker-end": "url(#arrow)",
+            })
+          );
+        });
+      }
+
+      function renderTables() {
+        tablesG.innerHTML = "";
+        visibleTables.forEach((t) => {
+          const cols = schema.columns[t] || [];
+          const pks = new Set(schema.pks[t] || []);
+          const uqs = new Set(schema.uqs ? schema.uqs[t] || [] : []);
+          const fkMap = {};
+          (schema.refs || []).forEach((r) => {
+            if (r.from_table === t) fkMap[r.from_col] = true;
+          });
+          const pos = positions[t];
+          const h = tableHeights[t];
+          const clr = getTableColor(t);
+          const tableExplanation =
+            (schema.ai_table_explanations && schema.ai_table_explanations[t]) ||
+            (schema.table_comments && schema.table_comments[t]) ||
+            "Descripción generada por IA no disponible para esta tabla.";
+
+          const g = mkSVG("g", { class: "table-box", transform: `translate(${pos.x},${pos.y})`, "data-table": t });
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "#fff", filter: "url(#shadow)", stroke: clr, "stroke-width": 1.8, "stroke-opacity": 0.35 }));
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: clr }));
+          g.appendChild(mkSVG("rect", { x: 0, y: HDR_H - 10, width: COL_W, height: 10, fill: clr }));
+
+          const title = mkSVG("text", { x: 14, y: 29, class: "table-title" });
+          title.textContent = t;
+          g.appendChild(title);
+
+          const cnt = mkSVG("text", { x: COL_W - 12, y: 29, class: "table-meta" });
+          cnt.textContent = `${cols.length} cols`;
+          g.appendChild(cnt);
+
+          const hoverHit = mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: "transparent", stroke: "none" });
+          hoverHit.addEventListener("mouseenter", (evt) => showTooltip(t, tableExplanation, evt.clientX, evt.clientY));
+          hoverHit.addEventListener("mousemove", (evt) => {
+            if (tooltipEl.classList.contains("visible")) moveTooltip(evt.clientX, evt.clientY);
+          });
+          hoverHit.addEventListener("mouseleave", hideTooltip);
+          g.appendChild(hoverHit);
+
+          cols.forEach((col, i) => {
+            const y = HDR_H + i * ROW_H + 5;
+            const isPK = pks.has(col.name);
+            const isFK = fkMap[col.name];
+            const isUQ = uqs.has(col.name) && !isPK;
+            const fill = isPK ? "#fef3c7" : isFK ? "#e0e7ff" : isUQ ? "#dcfce7" : "transparent";
+            g.appendChild(mkSVG("rect", { x: 2, y: y - 1, width: COL_W - 4, height: ROW_H - 2, rx: 4, fill }));
+
+            const colName = mkSVG("text", { x: 14, y: y + 18, class: "col-name", fill: isPK ? "#92400e" : isFK ? "#3730a3" : isUQ ? "#047857" : "#0f172a" });
+            colName.textContent = col.name;
+            g.appendChild(colName);
+
+            const colType = mkSVG("text", { x: COL_W - 10, y: y + 18, class: "col-type" });
+            colType.textContent = col.type;
+            g.appendChild(colType);
+          });
+
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "none", stroke: clr, "stroke-width": 1.1, "stroke-opacity": 0.45 }));
+          tablesG.appendChild(g);
+        });
+      }
+
+      function fitAll() {
+        const vals = Object.values(positions);
+        if (!vals.length) return;
+        const minX = Math.min(...vals.map((p) => p.x));
+        const minY = Math.min(...vals.map((p) => p.y));
+        const maxX = Math.max(...vals.map((p) => p.x)) + COL_W;
+        const maxY = Math.max(...vals.map((p) => p.y + 220));
+        const vw = svg.clientWidth;
+        const vh = svg.clientHeight;
+        const sx = vw / (maxX - minX + 220);
+        const sy = vh / (maxY - minY + 180);
+        pz.scale = Math.min(sx, sy, 2.8) * 0.95;
+        pz.x = (vw - (maxX - minX) * pz.scale) / 2 - minX * pz.scale;
+        pz.y = (vh - (maxY - minY) * pz.scale) / 2 - minY * pz.scale;
+        applyTransform();
+      }
+
+      function activeDatasetLabel() {
+        const hit = datasets.find((d) => d.id === activeDataset);
+        return hit ? hit.label : activeDataset;
+      }
+
+      function updateStats() {
+        const nCols = visibleTables.reduce((acc, t) => acc + (schema.columns[t] || []).length, 0);
+        statsEl.textContent = `${activeDatasetLabel()} · ${visibleTables.length} tablas · ${nCols} columnas · ${visibleRefs.length} relaciones`;
+      }
+
+      function rerender() {
+        hideTooltip();
+        buildVisibleData();
+        computeLayout();
+        renderTables();
+        renderEdges();
+        fitAll();
+        updateStats();
+      }
+
+      async function loadDataset(key) {
+        activeDataset = key;
+        document.querySelectorAll("#source-tabs button").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.src === key);
+        });
+        const dataset = datasets.find((d) => d.id === key);
+        if (!dataset) {
+          throw new Error(`Dataset no encontrado: ${key}`);
+        }
+        const res = await fetch(`./data/${dataset.file}`, { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(`No se pudo cargar ${dataset.file} (${res.status})`);
+        }
+        schema = await res.json();
+        rerender();
+      }
+
+      searchEl.addEventListener("input", () => rerender());
+      document.getElementById("btn-fit").addEventListener("click", fitAll);
+
+      async function initDatasets() {
+        const res = await fetch(MANIFEST_FILE, { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(`No se pudo cargar ${MANIFEST_FILE} (${res.status})`);
+        }
+        datasets = await res.json();
+        if (!Array.isArray(datasets) || !datasets.length) {
+          throw new Error("Manifest vacío: genera data con build_erd_data_from_env.py");
+        }
+
+        const tabs = document.getElementById("source-tabs");
+        tabs.innerHTML = "";
+        datasets.forEach((d, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.dataset.src = d.id;
+          btn.textContent = d.label;
+          if (idx === 0) btn.classList.add("active");
+          btn.addEventListener("click", () => loadDataset(d.id).catch((err) => showError(err.message)));
+          tabs.appendChild(btn);
+        });
+
+        activeDataset = datasets[0].id;
+        await loadDataset(activeDataset);
+      }
+
+      let panning = false;
+      let psx = 0;
+      let psy = 0;
+      let pox = 0;
+      let poy = 0;
+      svg.addEventListener("mousedown", (evt) => {
+        if (evt.target === svg || evt.target.id === "svg") {
+          panning = true;
+          psx = evt.clientX;
+          psy = evt.clientY;
+          pox = pz.x;
+          poy = pz.y;
+        }
+      });
+      window.addEventListener("mousemove", (evt) => {
+        if (!panning) return;
+        pz.x = pox + (evt.clientX - psx);
+        pz.y = poy + (evt.clientY - psy);
+        applyTransform();
+      });
+      window.addEventListener("mouseup", () => {
+        panning = false;
+        hideTooltip();
+      });
+      svg.addEventListener(
+        "wheel",
+        (evt) => {
+          evt.preventDefault();
+          const delta = evt.deltaY > 0 ? 0.9 : 1.1;
+          const rect = svg.getBoundingClientRect();
+          const mx = evt.clientX - rect.left;
+          const my = evt.clientY - rect.top;
+          pz.x = mx - (mx - pz.x) * delta;
+          pz.y = my - (my - pz.y) * delta;
+          pz.scale = Math.min(4, Math.max(0.15, pz.scale * delta));
+          applyTransform();
+        },
+        { passive: false }
+      );
+
+      initDatasets().catch((err) => showError(err.message));
+    </script>
+  </body>
+</html>

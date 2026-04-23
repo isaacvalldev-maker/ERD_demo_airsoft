@@ -1,0 +1,49 @@
+name: Weekly ERD Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every Monday 13:00 UTC
+    - cron: "0 13 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-erd:
+    runs-on: ubuntu-latest
+    env:
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_SERVICE: ${{ secrets.DB_SERVICE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip oracledb
+
+      - name: Validate required DB secrets
+        run: |
+          test -n "$DB_HOST"
+          test -n "$DB_PORT"
+          test -n "$DB_USER"
+          test -n "$DB_PASSWORD"
+          test -n "$DB_SERVICE"
+
+      - name: Regenerate ERD datasets
+        run: python erd/build_erd_data_from_env.py --with-comments --ai-mode heuristic
+
+      - name: Commit refreshed ERD data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: weekly ERD refresh"
+          file_pattern: |
+            erd/data/*.json

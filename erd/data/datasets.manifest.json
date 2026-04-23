@@ -1,0 +1,37 @@
+[
+  {
+    "id": "rats",
+    "label": "RATS",
+    "file": "rats.schema.json",
+    "tables": 216,
+    "relations": 83
+  },
+  {
+    "id": "tml",
+    "label": "TML",
+    "file": "tml.schema.json",
+    "tables": 23,
+    "relations": 5
+  },
+  {
+    "id": "airsoft_module4_non_routine",
+    "label": "Module 4: Non-Routine Data Base",
+    "file": "airsoft_module4_non_routine.schema.json",
+    "tables": 11,
+    "relations": 0
+  },
+  {
+    "id": "airsoft_module5_turnover_book",
+    "label": "Module 5: Turnover Book",
+    "file": "airsoft_module5_turnover_book.schema.json",
+    "tables": 1,
+    "relations": 0
+  },
+  {
+    "id": "airsoft_module7_contract_quotation",
+    "label": "Module 7: Contract & Quotation",
+    "file": "airsoft_module7_contract_quotation.schema.json",
+    "tables": 71,
+    "relations": 40
+  }
+]
