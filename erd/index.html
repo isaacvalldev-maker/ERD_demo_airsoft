@@ -353,8 +353,7 @@
           }
         });
 
-        // Isolated tables: align in horizontal rows on the left/right sides (same Y),
-        // so they don't look scattered vertically.
+        // Isolated tables: align in vertical pairs on the left/right sides of the main cluster.
         const allPos = Object.values(positions);
         let minX = 80;
         let maxX = 80 + COL_W;
@@ -368,41 +367,23 @@
         }
 
         const SIDE_GAP_X = 220;
-        const STEP_X = COL_W + 90;
-        const ROW_GAP_Y = 90;
-        const LEFT_START_X = minX - SIDE_GAP_X;
-        const RIGHT_START_X = maxX + SIDE_GAP_X;
+        const LEFT_X = minX - (COL_W + SIDE_GAP_X);
+        const RIGHT_X = maxX + SIDE_GAP_X;
+        const V_GAP = 70;
 
-        const leftList = [];
-        const rightList = [];
-        isolated.forEach((t, i) => {
-          (i % 2 === 0 ? leftList : rightList).push(t);
-        });
+        let curY = minY;
+        for (let i = 0; i < isolated.length; i += 2) {
+          const left = isolated[i];
+          const right = isolated[i + 1];
+          const hL = left ? tableHeights[left] || (HDR_H + 60) : 0;
+          const hR = right ? tableHeights[right] || (HDR_H + 60) : 0;
+          const rowH = Math.max(hL, hR);
 
-        const placeSide = (list, startX, dir) => {
-          let curY = minY;
-          let curX = startX;
-          let rowMaxH = 0;
-          const limitX = dir < 0 ? startX - STEP_X * 6 : startX + STEP_X * 6; // wrap after ~6 cards
-          list.forEach((t) => {
-            const h = tableHeights[t] || (HDR_H + 60);
-            const nextX = curX + dir * STEP_X;
-            const wouldWrap = dir < 0 ? nextX < limitX : nextX > limitX;
-            if (wouldWrap) {
-              curY += rowMaxH + ROW_GAP_Y;
-              curX = startX;
-              rowMaxH = 0;
-            }
-            const x = dir < 0 ? curX - COL_W : curX;
-            positions[t] = { x, y: curY };
-            rowMaxH = Math.max(rowMaxH, h);
-            curX += dir * STEP_X;
-          });
-        };
+          if (left) positions[left] = { x: LEFT_X, y: curY };
+          if (right) positions[right] = { x: RIGHT_X, y: curY };
 
-        // Left goes to the left (dir -1), right goes to the right (dir +1)
-        placeSide(leftList, LEFT_START_X, -1);
-        placeSide(rightList, RIGHT_START_X, +1);
+          curY += rowH + V_GAP;
+        }
       }
 
       function mkSVG(tag, attrs) {
