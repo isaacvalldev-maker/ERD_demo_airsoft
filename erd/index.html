@@ -298,7 +298,8 @@
         connected.forEach((comp) => ordered.push(...comp.slice().sort()));
         ordered.push(...isolated);
 
-        const GRID_COLS = 6;
+        // More horizontal than vertical: use many columns so it stretches sideways.
+        const GRID_COLS = Math.min(18, Math.max(8, Math.ceil(Math.sqrt(ordered.length) * 2)));
         const X_GAP = COL_W + 90;
         const Y_GAP = 70;
         const START_X = 80;
