@@ -907,7 +907,7 @@
 
           // Clamp delta: mouse wheels can spike on first tick.
           const dy = Math.max(-60, Math.min(60, evt.deltaY));
-          const factor = Math.exp(-dy * 0.00045);
+          const factor = Math.exp(-dy * 0.0006);
           pz._zoom.targetScale = Math.min(4, Math.max(0.15, pz._zoom.targetScale * factor));
 
           if (pz._zoom.raf) return;
@@ -915,7 +915,7 @@
           const startX = pz.x;
           const startY = pz.y;
           const startT = performance.now();
-          const dur = 140;
+          const dur = 190;
           const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
           const step = (now) => {
