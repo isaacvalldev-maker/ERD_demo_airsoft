@@ -147,6 +147,10 @@
       #minimap .vp { fill: none; stroke: #93c5fd; stroke-width: 1.2; opacity: 0.95; }
       #minimap .dot { fill: #94a3b8; opacity: 0.75; }
       #minimap .dot.sel { fill: #a7f3d0; opacity: 1; }
+
+      /* Cluster boxes */
+      .cluster-box { fill: #0f172a; stroke: #1f2a44; stroke-width: 1.4; opacity: 0.95; }
+      .cluster-label { fill: #cbd5e1; font-size: 12px; font-weight: 800; letter-spacing: 0.02em; }
     </style>
   </head>
   <body>
@@ -179,6 +183,7 @@
           </filter>
         </defs>
         <g id="viewport">
+          <g id="clusters"></g>
           <g id="edges"></g>
           <g id="tables"></g>
         </g>
@@ -221,6 +226,7 @@
 
       const svg = document.getElementById("svg");
       const viewport = document.getElementById("viewport");
+      const clustersG = document.getElementById("clusters");
       const edgesG = document.getElementById("edges");
       const tablesG = document.getElementById("tables");
       const canvasEl = document.getElementById("canvas");
@@ -263,6 +269,7 @@
       let neighborTables = new Set();
       let refsByTable = {};
       let bounds = null;
+      let clusterLayouts = [];
 
       function syncCanvasTop() {
         if (!canvasEl || !toolbar) return;
@@ -487,52 +494,131 @@
           components.push(comp);
         });
 
-        // Clustered layout: group by schema/prefix to create visual "islands".
+        // Grouped grid layout (no radial/circle): clusters by schema/prefix + "Other / Low connectivity".
         const groupKey = (t) => {
           if (t.includes(".")) return t.split(".", 1)[0].toUpperCase();
           return t.split("_", 1)[0].toUpperCase();
         };
 
+        const degree = {};
+        visibleTables.forEach((t) => {
+          degree[t] = refsByTable[t] ? refsByTable[t].length : 0;
+        });
+
+        const LOW_DEGREE_MAX = 1;
+        const OTHER_KEY = "Other / Low connectivity";
+
         const groups = {};
         visibleTables.forEach((t) => {
-          const k = groupKey(t);
+          const base = groupKey(t);
+          const k = degree[t] <= LOW_DEGREE_MAX ? OTHER_KEY : base;
           (groups[k] ||= []).push(t);
         });
-        const gKeys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b));
 
+        const gKeys = Object.keys(groups).sort((a, b) => {
+          if (a === OTHER_KEY) return 1;
+          if (b === OTHER_KEY) return -1;
+          const da = groups[a].length;
+          const db = groups[b].length;
+          if (db !== da) return db - da;
+          return a.localeCompare(b);
+        });
+
+        const vw = Math.max(900, svg.clientWidth || 1200);
+        const baseCols = Math.floor(vw / (COL_W + 140));
+        const CLUSTER_COLS = Math.max(4, Math.min(8, baseCols));
+
+        // Cluster placement (dashboard-like)
         positions = {};
+        clusterLayouts = [];
         const START_X = 90;
-        const START_Y = 80;
-        const CLUSTER_GAP_X = 320;
-        const CLUSTER_GAP_Y = 320;
-        const MAX_ROW_W = 5200; // prevents a long stretched strip
+        const START_Y = 110;
+        const CLUSTER_PAD_X = 34;
+        const CLUSTER_PAD_Y = 44; // includes label space
+        const CLUSTER_GAP_X = 220;
+        const CLUSTER_GAP_Y = 260;
+        const MAX_ROW_W = 5600;
 
         let curX = START_X;
         let curY = START_Y;
         let maxRowH = 0;
 
-        gKeys.forEach((k) => {
-          const tables = groups[k].slice().sort();
-          const n = tables.length;
-          const cols = Math.max(2, Math.min(9, Math.ceil(Math.sqrt(n))));
-          const rows = Math.ceil(n / cols);
-          const cellW = COL_W + 120;
+        const orderWithinGroup = (tables) => {
+          // Keep related/connected close: start from highest-degree and BFS locally.
+          const set = new Set(tables);
+          const localAdj = {};
+          tables.forEach((t) => (localAdj[t] = new Set()));
+          visibleRefs.forEach((r) => {
+            if (set.has(r.from_table) && set.has(r.to_table)) {
+              localAdj[r.from_table].add(r.to_table);
+              localAdj[r.to_table].add(r.from_table);
+            }
+          });
 
-          // row heights based on tallest card in that row
+          const remaining = new Set(tables);
+          const out = [];
+          const pickSeed = () => {
+            let best = null;
+            remaining.forEach((t) => {
+              if (!best) best = t;
+              else if (degree[t] > degree[best]) best = t;
+              else if (degree[t] === degree[best] && t < best) best = t;
+            });
+            return best;
+          };
+
+          while (remaining.size) {
+            const seed = pickSeed();
+            if (!seed) break;
+            const q = [seed];
+            remaining.delete(seed);
+            while (q.length) {
+              const cur = q.shift();
+              out.push(cur);
+              Array.from(localAdj[cur]).sort().forEach((nb) => {
+                if (remaining.has(nb)) {
+                  remaining.delete(nb);
+                  q.push(nb);
+                }
+              });
+            }
+          }
+          return out;
+        };
+
+        gKeys.forEach((k) => {
+          const rawTables = groups[k].slice();
+          const tables = orderWithinGroup(rawTables);
+          const n = tables.length;
+          const cols = Math.min(CLUSTER_COLS, Math.max(4, Math.ceil(Math.sqrt(n))));
+          const rows = Math.ceil(n / cols);
+          const cellW = COL_W + 110;
+
           const rowHeights = new Array(rows).fill(0);
           for (let i = 0; i < n; i += 1) {
             const r = Math.floor(i / cols);
             rowHeights[r] = Math.max(rowHeights[r], tableHeights[tables[i]] || (HDR_H + 140));
           }
 
-          const clusterW = cols * cellW;
-          const clusterH = rowHeights.reduce((a, b) => a + b, 0) + (rows - 1) * 90;
+          const innerW = cols * cellW;
+          const innerH = rowHeights.reduce((a, b) => a + b, 0) + (rows - 1) * 70;
+          const clusterW = innerW + CLUSTER_PAD_X * 2;
+          const clusterH = innerH + CLUSTER_PAD_Y + 26;
 
           if (curX + clusterW > START_X + MAX_ROW_W && curX !== START_X) {
             curX = START_X;
             curY += maxRowH + CLUSTER_GAP_Y;
             maxRowH = 0;
           }
+
+          // record cluster box (for labels + background)
+          clusterLayouts.push({
+            key: k,
+            x: curX,
+            y: curY - 56,
+            w: clusterW,
+            h: clusterH + 56,
+          });
 
           let yy = curY;
           for (let r = 0; r < rows; r += 1) {
@@ -541,18 +627,17 @@
               if (idx >= n) break;
               const t = tables[idx];
               positions[t] = {
-                x: curX + c * cellW,
+                x: curX + CLUSTER_PAD_X + c * cellW,
                 y: yy,
               };
             }
-            yy += rowHeights[r] + 90;
+            yy += rowHeights[r] + 70;
           }
 
           curX += clusterW + CLUSTER_GAP_X;
-          maxRowH = Math.max(maxRowH, clusterH);
+          maxRowH = Math.max(maxRowH, clusterH + 56);
         });
 
-        // Update bounds for minimap/fit
         const vals = Object.values(positions);
         if (vals.length) {
           const minX = Math.min(...vals.map((p) => p.x));
@@ -569,6 +654,26 @@
         const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
         Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
         return el;
+      }
+
+      function renderClusters() {
+        if (!clustersG) return;
+        clustersG.innerHTML = "";
+        (clusterLayouts || []).forEach((cl) => {
+          clustersG.appendChild(
+            mkSVG("rect", {
+              x: cl.x,
+              y: cl.y,
+              width: cl.w,
+              height: cl.h,
+              rx: 14,
+              class: "cluster-box",
+            })
+          );
+          const label = mkSVG("text", { x: cl.x + 14, y: cl.y + 26, class: "cluster-label" });
+          label.textContent = cl.key;
+          clustersG.appendChild(label);
+        });
       }
 
       function clientToWorld(clientX, clientY) {
@@ -815,6 +920,7 @@
         hideTooltip();
         buildVisibleData();
         computeLayout();
+        renderClusters();
         renderTables();
         renderEdges();
         fitAll();
