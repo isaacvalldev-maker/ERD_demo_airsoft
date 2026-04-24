@@ -353,37 +353,18 @@
           }
         });
 
-        // Isolated tables: align in vertical pairs on the left/right sides of the main cluster.
-        const allPos = Object.values(positions);
-        let minX = 80;
-        let maxX = 80 + COL_W;
-        let minY = 70;
-        let maxY = 70;
-        if (allPos.length) {
-          minX = Math.min(...allPos.map((p) => p.x));
-          maxX = Math.max(...allPos.map((p) => p.x)) + COL_W;
-          minY = Math.min(...allPos.map((p) => p.y));
-          maxY = Math.max(...allPos.map((p) => p.y));
+        // Isolated tables: place as a grid below the connected cluster (original behavior).
+        const cols = 6;
+        let isoY = oy + rowMaxH + 360;
+        if (Object.keys(positions).length > 0) {
+          isoY = Math.max(...Object.values(positions).map((p) => p.y)) + 420;
         }
-
-        const SIDE_GAP_X = 220;
-        const LEFT_X = minX - (COL_W + SIDE_GAP_X);
-        const RIGHT_X = maxX + SIDE_GAP_X;
-        const V_GAP = 70;
-
-        let curY = minY;
-        for (let i = 0; i < isolated.length; i += 2) {
-          const left = isolated[i];
-          const right = isolated[i + 1];
-          const hL = left ? tableHeights[left] || (HDR_H + 60) : 0;
-          const hR = right ? tableHeights[right] || (HDR_H + 60) : 0;
-          const rowH = Math.max(hL, hR);
-
-          if (left) positions[left] = { x: LEFT_X, y: curY };
-          if (right) positions[right] = { x: RIGHT_X, y: curY };
-
-          curY += rowH + V_GAP;
-        }
+        isolated.forEach((t, idx) => {
+          positions[t] = {
+            x: 80 + (idx % cols) * (COL_W + 90),
+            y: isoY + Math.floor(idx / cols) * 390,
+          };
+        });
       }
 
       function mkSVG(tag, attrs) {
