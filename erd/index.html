@@ -537,7 +537,11 @@
         const sx = vw / (maxX - minX + 220);
         const sy = vh / (maxY - minY + 180);
         pz.scale = Math.min(sx, sy, 2.8) * 0.95;
-        pz.x = (vw - (maxX - minX) * pz.scale) / 2 - minX * pz.scale;
+        // Align to the right (so the diagram sits on the right side),
+        // while keeping a small padding. This matches "todo al lado derecho".
+        const pad = 28;
+        pz.x = vw - (maxX - minX) * pz.scale - pad - minX * pz.scale;
+        // Keep vertically centered (can be changed to top-align if needed).
         pz.y = (vh - (maxY - minY) * pz.scale) / 2 - minY * pz.scale;
         applyTransform();
       }
