@@ -292,34 +292,98 @@
         const connected = components.filter((c) => c.length > 1).sort((a, b) => b.length - a.length);
         const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
 
-        // Grid layout: align tables in rows so they don't "float" at different vertical heights.
-        // Order: connected components first (bigger groups), then isolated.
-        const ordered = [];
-        connected.forEach((comp) => ordered.push(...comp.slice().sort()));
-        ordered.push(...isolated);
-
-        // More horizontal than vertical: use many columns so it stretches sideways.
-        const GRID_COLS = Math.min(18, Math.max(8, Math.ceil(Math.sqrt(ordered.length) * 2)));
-        const X_GAP = COL_W + 90;
-        const Y_GAP = 70;
-        const START_X = 80;
-        const START_Y = 70;
-
+        // Star layout for connected components (rings), but keep isolated tables aligned on the sides.
         positions = {};
-        let rowY = START_Y;
+        let ox = 80;
+        let oy = 70;
         let rowMaxH = 0;
-        ordered.forEach((t, idx) => {
-          const col = idx % GRID_COLS;
-          if (col === 0 && idx !== 0) {
-            rowY += rowMaxH + Y_GAP;
+        const CW = COL_W + 120;
+
+        connected.forEach((comp) => {
+          const hub = comp.reduce((best, cur) => (adj[cur].size > adj[best].size ? cur : best), comp[0]);
+          const compSet = new Set(comp);
+          const dist = { [hub]: 0 };
+          const q = [hub];
+          while (q.length) {
+            const cur = q.shift();
+            adj[cur].forEach((nb) => {
+              if (compSet.has(nb) && !(nb in dist)) {
+                dist[nb] = dist[cur] + 1;
+                q.push(nb);
+              }
+            });
+          }
+
+          const rings = [];
+          comp.forEach((t) => {
+            const d = dist[t] || 0;
+            while (rings.length <= d) rings.push([]);
+            rings[d].push(t);
+          });
+          rings.forEach((r) => r.sort());
+
+          const radii = [0];
+          for (let i = 1; i < rings.length; i += 1) {
+            const n = rings[i].length;
+            const minR = (n * CW) / (2 * Math.PI);
+            radii.push(Math.max(minR, radii[i - 1] + CW * 1.2));
+          }
+          const maxR = radii[radii.length - 1] + COL_W;
+          const cx = ox + maxR;
+          const cy = oy + maxR + 80;
+
+          rings.forEach((ring, ri) => {
+            ring.forEach((t, i) => {
+              const angle = ri === 0 ? -Math.PI / 2 : (2 * Math.PI * i) / ring.length - Math.PI / 2;
+              positions[t] = {
+                x: Math.round(cx + radii[ri] * Math.cos(angle)),
+                y: Math.round(cy + radii[ri] * Math.sin(angle)),
+              };
+            });
+          });
+
+          const compW = maxR * 2 + COL_W + 220;
+          const compH = maxR * 2 + 220;
+          rowMaxH = Math.max(rowMaxH, compH);
+          ox += compW;
+          if (ox > WRAP_X) {
+            ox = 80;
+            oy += rowMaxH + 240;
             rowMaxH = 0;
           }
-          positions[t] = {
-            x: START_X + col * X_GAP,
-            y: rowY,
-          };
-          rowMaxH = Math.max(rowMaxH, tableHeights[t] || (HDR_H + 60));
         });
+
+        // Isolated tables: align in vertical pairs on the left/right sides of the main cluster.
+        const allPos = Object.values(positions);
+        let minX = 80;
+        let maxX = 80 + COL_W;
+        let minY = 70;
+        let maxY = 70;
+        if (allPos.length) {
+          minX = Math.min(...allPos.map((p) => p.x));
+          maxX = Math.max(...allPos.map((p) => p.x)) + COL_W;
+          minY = Math.min(...allPos.map((p) => p.y));
+          maxY = Math.max(...allPos.map((p) => p.y));
+        }
+
+        const SIDE_GAP_X = 220;
+        const LEFT_X = minX - (COL_W + SIDE_GAP_X);
+        const RIGHT_X = maxX + SIDE_GAP_X;
+        const V_GAP = 70;
+
+        let curY = minY;
+        for (let i = 0; i < isolated.length; i += 2) {
+          const left = isolated[i];
+          const right = isolated[i + 1];
+          const hL = left ? tableHeights[left] || (HDR_H + 60) : 0;
+          const hR = right ? tableHeights[right] || (HDR_H + 60) : 0;
+          const rowH = Math.max(hL, hR);
+
+          if (left) positions[left] = { x: LEFT_X, y: curY };
+          if (right) positions[right] = { x: RIGHT_X, y: curY };
+
+          curY += rowH + V_GAP;
+        }
       }
 
       function mkSVG(tag, attrs) {
