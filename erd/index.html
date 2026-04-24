@@ -87,50 +87,6 @@
         position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
         background: #0f172ae0; color: #fff; padding: 20px; text-align: center; z-index: 200;
       }
-
-      /* Selection + focus */
-      .table-box.faded { opacity: 0.22; }
-      .table-box.neighbor { opacity: 0.9; }
-      .table-box.selected { opacity: 1; }
-      .table-box.core rect:first-child { stroke-width: 3.2; stroke-opacity: 0.75; }
-
-      /* Right-side details panel */
-      #details-panel {
-        position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        width: 340px;
-        padding: 12px 12px 14px;
-        background: #0b1220f5;
-        border-left: 1px solid #1f2a44;
-        z-index: 120;
-        display: none;
-        overflow: auto;
-        backdrop-filter: blur(6px);
-      }
-      #details-panel.visible { display: block; }
-      #details-title { font-size: 14px; font-weight: 800; color: #e2e8f0; margin-bottom: 6px; word-break: break-word; }
-      #details-meta { color: #94a3b8; font-size: 12px; margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
-      .details-chip { border: 1px solid #2a3a5c; background: #0f172a; padding: 4px 8px; border-radius: 999px; font-size: 11px; color: #cbd5e1; }
-      #details-desc { color: #e2e8f0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
-      #details-close {
-        position: sticky;
-        top: 0;
-        float: right;
-        margin-left: 10px;
-        border: 1px solid #2a3a5c;
-        background: #0f172a;
-        color: #cbd5e1;
-        border-radius: 8px;
-        padding: 6px 10px;
-        cursor: pointer;
-        font-size: 12px;
-      }
-
-      /* Cluster boxes */
-      .cluster-box { fill: #0f172a; stroke: #1f2a44; stroke-width: 1.4; opacity: 0.95; }
-      .cluster-label { fill: #cbd5e1; font-size: 12px; font-weight: 800; letter-spacing: 0.02em; }
     </style>
   </head>
   <body>
@@ -163,7 +119,6 @@
           </filter>
         </defs>
         <g id="viewport">
-          <g id="clusters"></g>
           <g id="edges"></g>
           <g id="tables"></g>
         </g>
@@ -173,12 +128,6 @@
       <strong></strong>
       <span id="table-tooltip-text"></span>
       <span id="table-tooltip-badge" class="meta-badge">Descripción</span>
-    </div>
-    <div id="details-panel" aria-label="Detalles de tabla">
-      <button id="details-close" type="button">Cerrar</button>
-      <div id="details-title"></div>
-      <div id="details-meta"></div>
-      <div id="details-desc"></div>
     </div>
     <div id="error"></div>
 
@@ -199,7 +148,6 @@
 
       const svg = document.getElementById("svg");
       const viewport = document.getElementById("viewport");
-      const clustersG = document.getElementById("clusters");
       const edgesG = document.getElementById("edges");
       const tablesG = document.getElementById("tables");
       const canvasEl = document.getElementById("canvas");
@@ -211,11 +159,6 @@
       const tooltipTitleEl = tooltipEl.querySelector("strong");
       const tooltipTextEl = document.getElementById("table-tooltip-text");
       const tooltipBadgeEl = document.getElementById("table-tooltip-badge");
-      const detailsPanelEl = document.getElementById("details-panel");
-      const detailsTitleEl = document.getElementById("details-title");
-      const detailsMetaEl = document.getElementById("details-meta");
-      const detailsDescEl = document.getElementById("details-desc");
-      const detailsCloseEl = document.getElementById("details-close");
       const airsoftRow = document.getElementById("airsoft-parts");
       const airsoftTabs = document.getElementById("airsoft-tabs");
       const AIRSOFT_ROOT_ID = "airsoft_full";
@@ -235,12 +178,6 @@
       let visibleRefs = [];
       let positions = {};
       let tableHeights = {};
-      let selectedTable = null;
-      let neighborTables = new Set();
-      let refsByTable = {};
-      let bounds = null;
-      let clusterLayouts = [];
-      let coreTables = new Set();
 
       function syncCanvasTop() {
         if (!canvasEl || !toolbar) return;
@@ -286,58 +223,6 @@
       function applyTransform() {
         viewport.setAttribute("transform", `translate(${pz.x},${pz.y}) scale(${pz.scale})`);
       }
-
-      function clearSelection() {
-        selectedTable = null;
-        neighborTables = new Set();
-        if (detailsPanelEl) detailsPanelEl.classList.remove("visible");
-        rerender();
-      }
-
-      if (detailsCloseEl) {
-        detailsCloseEl.addEventListener("click", clearSelection);
-      }
-
-      function setSelection(tableName) {
-        selectedTable = tableName;
-        neighborTables = new Set();
-        if (tableName && refsByTable[tableName]) {
-          refsByTable[tableName].forEach((r) => {
-            neighborTables.add(r.from_table);
-            neighborTables.add(r.to_table);
-          });
-        }
-        updateDetailsPanel();
-        rerender();
-      }
-
-      function updateDetailsPanel() {
-        if (!detailsPanelEl) return;
-        if (!selectedTable) {
-          detailsPanelEl.classList.remove("visible");
-          return;
-        }
-        detailsPanelEl.classList.add("visible");
-        if (detailsTitleEl) detailsTitleEl.textContent = selectedTable;
-        const cols = (schema && schema.columns && schema.columns[selectedTable]) ? schema.columns[selectedTable] : [];
-        const rels = refsByTable[selectedTable] ? refsByTable[selectedTable].length : 0;
-        const desc = (schema && schema.ai_table_explanations && schema.ai_table_explanations[selectedTable]) || "";
-        if (detailsMetaEl) {
-          detailsMetaEl.innerHTML = "";
-          const mk = (txt) => {
-            const s = document.createElement("span");
-            s.className = "details-chip";
-            s.textContent = txt;
-            return s;
-          };
-          detailsMetaEl.appendChild(mk(`${cols.length} columnas`));
-          detailsMetaEl.appendChild(mk(`${rels} relaciones directas`));
-        }
-        if (detailsDescEl) {
-          detailsDescEl.textContent = desc || "Sin descripción.";
-        }
-      }
-
 
       function getTableColor(tableName) {
         const owner = tableName.includes(".") ? tableName.split(".")[0] : tableName.split("_")[0];
@@ -404,239 +289,86 @@
           components.push(comp);
         });
 
-        // Grouped grid layout (no radial/circle): clusters by schema/prefix + "Other / Low connectivity".
-        const groupKey = (t) => {
-          if (t.includes(".")) return t.split(".", 1)[0].toUpperCase();
-          return t.split("_", 1)[0].toUpperCase();
-        };
+        const connected = components.filter((c) => c.length > 1).sort((a, b) => b.length - a.length);
+        const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
 
-        const degree = {};
-        visibleTables.forEach((t) => {
-          degree[t] = refsByTable[t] ? refsByTable[t].length : 0;
-        });
-
-        // --- Core (high connectivity) ---
-        const sortedByDegree = visibleTables
-          .slice()
-          .sort((a, b) => (degree[b] || 0) - (degree[a] || 0) || a.localeCompare(b));
-
-        const CORE_MAX = 8;
-        const CORE_MIN_DEG = 10;
-        const core = [];
-        for (const t of sortedByDegree) {
-          if (core.length >= CORE_MAX) break;
-          if ((degree[t] || 0) >= CORE_MIN_DEG) core.push(t);
-        }
-        if (core.length < 4) {
-          core.splice(0, core.length, ...sortedByDegree.slice(0, 6));
-        }
-        coreTables = new Set(core);
-
-        const placed = new Set();
         positions = {};
-        clusterLayouts = [];
+        let ox = 80;
+        let oy = 70;
+        let rowMaxH = 0;
+        const CW = COL_W + 120;
 
-        // Core area placement: compact grid near center
-        const CORE_COLS = core.length <= 4 ? 2 : 3;
-        const coreCellW = COL_W + 160;
-        const coreCellH = 320;
-        const CORE_X = 520;
-        const CORE_Y = 160;
-        core.forEach((t, i) => {
-          const r = Math.floor(i / CORE_COLS);
-          const c = i % CORE_COLS;
-          positions[t] = { x: CORE_X + c * coreCellW, y: CORE_Y + r * coreCellH };
-          placed.add(t);
-        });
-
-        // Neighbor star (loose, not circular): place direct neighbors in small arcs around each core table
-        const taken = new Set(core);
-        const armRadius = 420;
-        const armStep = 60;
-        core.forEach((ct) => {
-          const base = positions[ct];
-          if (!base) return;
-          const nbs = (refsByTable[ct] || [])
-            .map((r) => (r.from_table === ct ? r.to_table : r.from_table))
-            .filter((t) => t && !coreTables.has(t));
-          const uniq = Array.from(new Set(nbs)).sort((a, b) => (degree[b] || 0) - (degree[a] || 0) || a.localeCompare(b));
-          const maxNb = 16;
-          let idx = 0;
-          for (const nb of uniq) {
-            if (idx >= maxNb) break;
-            if (taken.has(nb)) continue;
-            // Alternate placement in 4 quadrants (star arms) with slight jitter
-            const arm = idx % 4;
-            const layer = Math.floor(idx / 4);
-            const dx = (arm === 0 ? 1 : arm === 1 ? -1 : 0) * (armRadius + layer * armStep);
-            const dy = (arm === 2 ? 1 : arm === 3 ? -1 : 0) * (armRadius + layer * armStep);
-            const jx = ((idx * 37) % 60) - 30;
-            const jy = ((idx * 53) % 60) - 30;
-            positions[nb] = { x: Math.round(base.x + dx + jx), y: Math.round(base.y + dy + jy) };
-            taken.add(nb);
-            placed.add(nb);
-            idx += 1;
-          }
-        });
-
-        // --- Secondary: grouped grid clusters (quiet) ---
-        const OTHER_KEY = "Other / Low connectivity";
-        const LOW_DEGREE_MAX = 1;
-
-        const remaining = visibleTables.filter((t) => !placed.has(t));
-        const groups = {};
-        remaining.forEach((t) => {
-          const base = groupKey(t);
-          const k = (degree[t] || 0) <= LOW_DEGREE_MAX ? OTHER_KEY : base;
-          (groups[k] ||= []).push(t);
-        });
-        const gKeys = Object.keys(groups).sort((a, b) => {
-          if (a === OTHER_KEY) return 1;
-          if (b === OTHER_KEY) return -1;
-          const da = groups[a].length;
-          const db = groups[b].length;
-          if (db !== da) return db - da;
-          return a.localeCompare(b);
-        });
-
-        const vw = Math.max(900, svg.clientWidth || 1200);
-        const baseCols = Math.floor(vw / (COL_W + 180));
-        const CLUSTER_COLS = Math.max(4, Math.min(6, baseCols));
-
-        // Put secondary below core area
-        const coreVals = Object.values(positions);
-        const coreMaxY = coreVals.length ? Math.max(...coreVals.map((p) => p.y)) : 200;
-        const START_X = 120;
-        const START_Y = coreMaxY + 640;
-        const CLUSTER_PAD_X = 34;
-        const CLUSTER_PAD_Y = 44;
-        const CLUSTER_GAP_X = 220;
-        const CLUSTER_GAP_Y = 240;
-        const MAX_ROW_W = 5200;
-
-        let curX = START_X;
-        let curY = START_Y;
-        let maxRowH = 0;
-
-        const orderWithinGroup = (tables) => {
-          const set = new Set(tables);
-          const localAdj = {};
-          tables.forEach((t) => (localAdj[t] = new Set()));
-          visibleRefs.forEach((r) => {
-            if (set.has(r.from_table) && set.has(r.to_table)) {
-              localAdj[r.from_table].add(r.to_table);
-              localAdj[r.to_table].add(r.from_table);
-            }
-          });
-          const remaining = new Set(tables);
-          const out = [];
-          const pickSeed = () => {
-            let best = null;
-            remaining.forEach((t) => {
-              if (!best) best = t;
-              else if (degree[t] > degree[best]) best = t;
-              else if (degree[t] === degree[best] && t < best) best = t;
+        connected.forEach((comp) => {
+          const hub = comp.reduce((best, cur) => (adj[cur].size > adj[best].size ? cur : best), comp[0]);
+          const compSet = new Set(comp);
+          const dist = { [hub]: 0 };
+          const q = [hub];
+          while (q.length) {
+            const cur = q.shift();
+            adj[cur].forEach((nb) => {
+              if (compSet.has(nb) && !(nb in dist)) {
+                dist[nb] = dist[cur] + 1;
+                q.push(nb);
+              }
             });
-            return best;
-          };
-          while (remaining.size) {
-            const seed = pickSeed();
-            if (!seed) break;
-            const q = [seed];
-            remaining.delete(seed);
-            while (q.length) {
-              const cur = q.shift();
-              out.push(cur);
-              Array.from(localAdj[cur]).sort().forEach((nb) => {
-                if (remaining.has(nb)) {
-                  remaining.delete(nb);
-                  q.push(nb);
-                }
-              });
-            }
-          }
-          return out;
-        };
-
-        gKeys.forEach((k) => {
-          const tables = orderWithinGroup(groups[k].slice());
-          const n = tables.length;
-          if (!n) return;
-          const cols = Math.min(CLUSTER_COLS, Math.max(4, Math.ceil(Math.sqrt(n))));
-          const rows = Math.ceil(n / cols);
-          const cellW = COL_W + 110;
-
-          const rowHeights = new Array(rows).fill(0);
-          for (let i = 0; i < n; i += 1) {
-            const r = Math.floor(i / cols);
-            rowHeights[r] = Math.max(rowHeights[r], tableHeights[tables[i]] || (HDR_H + 140));
           }
 
-          const innerW = cols * cellW;
-          const innerH = rowHeights.reduce((a, b) => a + b, 0) + (rows - 1) * 70;
-          const clusterW = innerW + CLUSTER_PAD_X * 2;
-          const clusterH = innerH + CLUSTER_PAD_Y + 26;
+          const rings = [];
+          comp.forEach((t) => {
+            const d = dist[t] || 0;
+            while (rings.length <= d) rings.push([]);
+            rings[d].push(t);
+          });
+          rings.forEach((r) => r.sort());
 
-          if (curX + clusterW > START_X + MAX_ROW_W && curX !== START_X) {
-            curX = START_X;
-            curY += maxRowH + CLUSTER_GAP_Y;
-            maxRowH = 0;
+          const radii = [0];
+          for (let i = 1; i < rings.length; i += 1) {
+            const n = rings[i].length;
+            const minR = (n * CW) / (2 * Math.PI);
+            radii.push(Math.max(minR, radii[i - 1] + CW * 1.2));
           }
+          const maxR = radii[radii.length - 1] + COL_W;
+          const cx = ox + maxR;
+          const cy = oy + maxR + 80;
 
-          clusterLayouts.push({ key: k, x: curX, y: curY - 56, w: clusterW, h: clusterH + 56 });
+          rings.forEach((ring, ri) => {
+            ring.forEach((t, i) => {
+              const angle = ri === 0 ? -Math.PI / 2 : (2 * Math.PI * i) / ring.length - Math.PI / 2;
+              positions[t] = {
+                x: Math.round(cx + radii[ri] * Math.cos(angle)),
+                y: Math.round(cy + radii[ri] * Math.sin(angle)),
+              };
+            });
+          });
 
-          let yy = curY;
-          for (let r = 0; r < rows; r += 1) {
-            for (let c = 0; c < cols; c += 1) {
-              const idx = r * cols + c;
-              if (idx >= n) break;
-              const t = tables[idx];
-              positions[t] = { x: curX + CLUSTER_PAD_X + c * cellW, y: yy };
-              placed.add(t);
-            }
-            yy += rowHeights[r] + 70;
+          const compW = maxR * 2 + COL_W + 220;
+          const compH = maxR * 2 + 220;
+          rowMaxH = Math.max(rowMaxH, compH);
+          ox += compW;
+          if (ox > WRAP_X) {
+            ox = 80;
+            oy += rowMaxH + 240;
+            rowMaxH = 0;
           }
-
-          curX += clusterW + CLUSTER_GAP_X;
-          maxRowH = Math.max(maxRowH, clusterH + 56);
         });
 
-        const vals = Object.values(positions);
-        if (vals.length) {
-          const minX = Math.min(...vals.map((p) => p.x));
-          const minY = Math.min(...vals.map((p) => p.y));
-          const maxX = Math.max(...vals.map((p) => p.x)) + COL_W;
-          const maxY = Math.max(...vals.map((p) => p.y)) + 260;
-          bounds = { minX, minY, maxX, maxY };
-        } else {
-          bounds = null;
+        const cols = 6;
+        let isoY = oy + rowMaxH + 360;
+        if (Object.keys(positions).length > 0) {
+          isoY = Math.max(...Object.values(positions).map((p) => p.y)) + 420;
         }
+        isolated.forEach((t, idx) => {
+          positions[t] = {
+            x: 80 + (idx % cols) * (COL_W + 90),
+            y: isoY + Math.floor(idx / cols) * 390,
+          };
+        });
       }
 
       function mkSVG(tag, attrs) {
         const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
         Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
         return el;
-      }
-
-      function renderClusters() {
-        if (!clustersG) return;
-        clustersG.innerHTML = "";
-        (clusterLayouts || []).forEach((cl) => {
-          clustersG.appendChild(
-            mkSVG("rect", {
-              x: cl.x,
-              y: cl.y,
-              width: cl.w,
-              height: cl.h,
-              rx: 14,
-              class: "cluster-box",
-            })
-          );
-          const label = mkSVG("text", { x: cl.x + 14, y: cl.y + 26, class: "cluster-label" });
-          label.textContent = cl.key;
-          clustersG.appendChild(label);
-        });
       }
 
       function clientToWorld(clientX, clientY) {
@@ -677,16 +409,13 @@
           }
 
           const d = `M${fx},${fy} C${cp1},${fy} ${cp2},${ty} ${tx},${ty}`;
-          const isFocus = selectedTable && (r.from_table === selectedTable || r.to_table === selectedTable);
-          const isRelated = selectedTable && (neighborTables.has(r.from_table) && neighborTables.has(r.to_table));
-          const dim = selectedTable && !isRelated;
           edgesG.appendChild(
             mkSVG("path", {
               d,
               fill: "none",
-              stroke: isFocus ? "#a7f3d0" : "#6366f1",
-              "stroke-width": isFocus ? 2.6 : 2,
-              "stroke-opacity": dim ? 0.08 : 0.55,
+              stroke: "#6366f1",
+              "stroke-width": 2,
+              "stroke-opacity": 0.55,
               "marker-end": "url(#arrow)",
             })
           );
@@ -718,12 +447,8 @@
           const badgeText = hasComment ? "Basado en comentarios del catálogo" : "Generado por IA";
           const badgeKind = hasComment ? "comment" : "ai";
 
-          const g = mkSVG("g", { class: `table-box${coreTables && coreTables.has(t) ? " core" : ""}`, transform: `translate(${pos.x},${pos.y})`, "data-table": t });
-          g.addEventListener("click", (evt) => {
-            evt.stopPropagation();
-            setSelection(t);
-          });
-          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 12, fill: "#0b1220", filter: "url(#shadow)", stroke: clr, "stroke-width": 2.2, "stroke-opacity": 0.55 }));
+          const g = mkSVG("g", { class: "table-box", transform: `translate(${pos.x},${pos.y})`, "data-table": t });
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "#0b1220", filter: "url(#shadow)", stroke: clr, "stroke-width": 1.8, "stroke-opacity": 0.35 }));
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: clr }));
           g.appendChild(mkSVG("rect", { x: 0, y: HDR_H - 10, width: COL_W, height: 10, fill: clr }));
 
@@ -748,7 +473,7 @@
             const isPK = pks.has(col.name);
             const isFK = fkMap[col.name];
             const isUQ = uqs.has(col.name) && !isPK;
-            const fill = isPK ? "#2a2206" : isFK ? "#0b1b3d" : isUQ ? "#052413" : "transparent";
+            const fill = isPK ? "#fef3c7" : isFK ? "#e0e7ff" : isUQ ? "#dcfce7" : "transparent";
             g.appendChild(mkSVG("rect", { x: 2, y: y - 1, width: COL_W - 4, height: ROW_H - 2, rx: 4, fill }));
 
             const colName = mkSVG("text", { x: 14, y: y + 18, class: "col-name", fill: isPK ? "#fbbf24" : isFK ? "#a5b4fc" : isUQ ? "#86efac" : "#e2e8f0" });
@@ -761,12 +486,6 @@
           });
 
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "none", stroke: clr, "stroke-width": 1.1, "stroke-opacity": 0.45 }));
-          // Selection fade
-          if (selectedTable) {
-            if (t === selectedTable) g.classList.add("selected");
-            else if (neighborTables.has(t)) g.classList.add("neighbor");
-            else g.classList.add("faded");
-          }
           tablesG.appendChild(g);
           tableEls[t] = g;
         });
@@ -817,11 +536,7 @@
         const sx = vw / (maxX - minX + 220);
         const sy = vh / (maxY - minY + 180);
         pz.scale = Math.min(sx, sy, 2.8) * 0.95;
-        // Align to the right (so the diagram sits on the right side),
-        // while keeping a small padding. This matches "todo al lado derecho".
-        const pad = 28;
-        pz.x = vw - (maxX - minX) * pz.scale - pad - minX * pz.scale;
-        // Keep vertically centered (can be changed to top-align if needed).
+        pz.x = (vw - (maxX - minX) * pz.scale) / 2 - minX * pz.scale;
         pz.y = (vh - (maxY - minY) * pz.scale) / 2 - minY * pz.scale;
         applyTransform();
       }
@@ -883,7 +598,6 @@
         hideTooltip();
         buildVisibleData();
         computeLayout();
-        renderClusters();
         renderTables();
         renderEdges();
         fitAll();
@@ -1096,12 +810,6 @@
           poy = pz.y;
         }
       });
-      // Click on empty space clears selection
-      svg.addEventListener("click", (evt) => {
-        if (evt.target === svg || evt.target.id === "svg") {
-          clearSelection();
-        }
-      });
       window.addEventListener("mousemove", (evt) => {
         if (!panning) return;
         pz.x = pox + (evt.clientX - psx);
@@ -1116,58 +824,14 @@
         "wheel",
         (evt) => {
           evt.preventDefault();
+          const delta = evt.deltaY > 0 ? 0.9 : 1.1;
           const rect = svg.getBoundingClientRect();
           const mx = evt.clientX - rect.left;
           const my = evt.clientY - rect.top;
-
-          // Animated zoom: accumulate a targetScale and ease towards it.
-          // This removes the "first zoom jump" when deltaY spikes.
-          if (!pz._zoom) {
-            pz._zoom = { targetScale: pz.scale, raf: 0, lastMx: mx, lastMy: my };
-          }
-          pz._zoom.lastMx = mx;
-          pz._zoom.lastMy = my;
-
-          const oldTarget = pz._zoom.targetScale;
-          // Clamp delta and use a gentler curve to avoid "too much" first zoom.
-          const dy = Math.max(-60, Math.min(60, evt.deltaY));
-          const factor = Math.exp(-dy * 0.0004);
-          const nextTarget = Math.min(4, Math.max(0.15, oldTarget * factor));
-          pz._zoom.targetScale = nextTarget;
-
-          const start = performance.now();
-          const startScale = pz.scale;
-          const startX = pz.x;
-          const startY = pz.y;
-
-          const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-          const durationMs = 140;
-
-          const step = (now) => {
-            const t = Math.min(1, (now - start) / durationMs);
-            const k = easeOutCubic(t);
-            const desired = startScale + (pz._zoom.targetScale - startScale) * k;
-            const ratio = desired / pz.scale;
-            const ax = pz._zoom.lastMx;
-            const ay = pz._zoom.lastMy;
-            pz.x = ax - (ax - pz.x) * ratio;
-            pz.y = ay - (ay - pz.y) * ratio;
-            pz.scale = desired;
-            applyTransform();
-            if (t < 1) {
-              pz._zoom.raf = requestAnimationFrame(step);
-            } else {
-              pz._zoom.raf = 0;
-            }
-          };
-
-          if (!pz._zoom.raf) {
-            // ensure we start from the current state
-            pz.x = startX;
-            pz.y = startY;
-            pz.scale = startScale;
-            pz._zoom.raf = requestAnimationFrame(step);
-          }
+          pz.x = mx - (mx - pz.x) * delta;
+          pz.y = my - (my - pz.y) * delta;
+          pz.scale = Math.min(4, Math.max(0.15, pz.scale * delta));
+          applyTransform();
         },
         { passive: false }
       );
