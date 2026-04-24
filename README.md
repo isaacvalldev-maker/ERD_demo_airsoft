@@ -104,3 +104,24 @@ Para activarlo en el GitHub del cliente:
 3. Habilitar Actions.
 4. Ejecutar una vez manualmente `Weekly ERD Refresh` (workflow_dispatch).
 5. Luego quedará automático semanalmente (lunes 13:00 UTC).
+
+## Automatización semanal en Mac con FortiClient (VPN)
+
+Si la BD solo es accesible dentro de VPN (FortiClient), lo más simple es correr el refresco **desde un Mac dentro de la VPN** y hacer `git push` de los JSON. GitHub Pages (o Vercel estático) solo sirve los archivos ya generados.
+
+1. En el Mac (con VPN), clona el repo y crea `erd/.env` desde `erd/.env.example`.
+2. Instala dependencias:
+   - `pip3 install oracledb ibm_db ibm_db_dbi`
+3. Instala el job semanal (launchd):
+
+   - `bash tools/install_launchd.sh`
+
+Esto crea `~/Library/LaunchAgents/com.client.erd.weekly.plist` y lo carga.
+
+Ejecutar manualmente para probar:
+- `launchctl start com.client.erd.weekly`
+
+Logs:
+- `tools/.logs/erd_weekly.out`
+- `tools/.logs/erd_weekly.err`
+
