@@ -323,6 +323,11 @@ def get_schema_db2(
 
 def get_schema(connection, with_comments: bool = False, owners: Optional[List[str]] = None):
     cursor = connection.cursor()
+    try:
+        cursor.arraysize = 5000
+        cursor.prefetchrows = 5000
+    except Exception:
+        pass
 
     system_owners = (
         "SYS", "SYSTEM", "OUTLN", "DBSNMP", "APPQOSSYS", "WMSYS", "EXFSYS",
@@ -345,6 +350,7 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
     rows = cursor.fetchall()
     tables = [f"{r[0]}.{r[1]}" for r in rows]
     table_set = set(tables)
+    print(f"Oracle: {len(tables)} tablas detectadas")
 
     wh, bind = owner_filter()
     cursor.execute(
@@ -354,7 +360,8 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
         bind,
     )
     columns: Dict[str, List[Dict[str, Any]]] = {}
-    for row in cursor.fetchall():
+    col_count = 0
+    for row in cursor:
         t = f"{row[0]}.{row[1]}"
         if t not in table_set:
             continue
@@ -366,6 +373,10 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
                 "comment": None,
             }
         )
+        col_count += 1
+        if col_count % 50000 == 0:
+            print(f"Oracle: {col_count} columnas leídas...")
+    print(f"Oracle: {col_count} columnas leídas")
 
     table_comments: Dict[str, str] = {}
     if with_comments:
@@ -406,7 +417,7 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
         bind,
     )
     pks: Dict[str, List[str]] = {}
-    for row in cursor.fetchall():
+    for row in cursor:
         k = f"{row[0]}.{row[1]}"
         pks.setdefault(k, []).append(row[2])
 
@@ -420,7 +431,7 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
             f"WHERE c.constraint_type = 'U' AND {wh} ORDER BY cc.table_name, cc.position",
             bind,
         )
-        for row in cursor.fetchall():
+        for row in cursor:
             k = f"{row[0]}.{row[1]}"
             uqs.setdefault(k, []).append(row[2])
     except Exception:
@@ -439,7 +450,7 @@ def get_schema(connection, with_comments: bool = False, owners: Optional[List[st
         bind,
     )
     refs: List[Dict[str, Any]] = []
-    for row in cursor.fetchall():
+    for row in cursor:
         refs.append(
             {
                 "from_table": f"{row[0]}.{row[1]}",
@@ -1024,6 +1035,11 @@ def main() -> None:
         help="Incluye comentarios de tablas/columnas (Oracle o DB2 si existen)",
     )
     parser.add_argument(
+        "--oracle-owners",
+        default="",
+        help="Lista CSV de owners Oracle a incluir (ej: RATS,TML). Alternativa: env ORACLE_OWNERS",
+    )
+    parser.add_argument(
         "--from-existing",
         action="store_true",
         help="No usa BD: toma rats/tml actuales y genera módulos + manifest",
@@ -1140,10 +1156,12 @@ def main() -> None:
             print("Conectando a Oracle para extraer esquema...")
             conn = get_db_connection_oracle(db_config)
             try:
+                owners_csv = args.oracle_owners or env_data.get("ORACLE_OWNERS", "")
+                owners = [o.strip() for o in owners_csv.split(",") if o.strip()] or None
                 schema = get_schema(
                     conn,
                     with_comments=args.with_comments,
-                    owners=None,
+                    owners=owners,
                 )
             finally:
                 conn.close()
