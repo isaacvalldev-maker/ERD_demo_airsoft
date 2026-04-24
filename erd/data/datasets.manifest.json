@@ -6,16 +6,18 @@
       "label": "RATS",
       "file": "rats.schema.json",
       "kind": "base",
-      "tables": 216,
-      "relations": 83
+      "tables": 286,
+      "relations": 83,
+      "source": "oracle"
     },
     {
       "id": "tml",
       "label": "TML",
       "file": "tml.schema.json",
       "kind": "base",
-      "tables": 23,
-      "relations": 5
+      "tables": 24,
+      "relations": 5,
+      "source": "oracle"
     },
     {
       "id": "airsoft_full",
@@ -28,44 +30,50 @@
           "label": "Non-routine-data base",
           "file": "airsoft_module4_non_routine.schema.json",
           "kind": "airsoft_module",
-          "tables": 11,
-          "relations": 0
+          "tables": 48,
+          "relations": 12,
+          "source": "oracle"
         },
         {
           "id": "airsoft_module5_turnover_book",
           "label": "Turnover book",
           "file": "airsoft_module5_turnover_book.schema.json",
           "kind": "airsoft_module",
-          "tables": 1,
-          "relations": 0
+          "tables": 6,
+          "relations": 0,
+          "source": "oracle"
         },
         {
           "id": "airsoft_module6_digitalization_docmat",
           "label": "Digitalization (DOCMAT)",
           "file": "airsoft_module6_digitalization_docmat.schema.json",
           "kind": "airsoft_module",
-          "tables": 0,
-          "relations": 0
+          "tables": 7,
+          "relations": 5,
+          "source": "oracle"
         },
         {
           "id": "airsoft_module7_contract_quotation",
           "label": "Contract and quotation",
           "file": "airsoft_module7_contract_quotation.schema.json",
           "kind": "airsoft_module",
-          "tables": 71,
-          "relations": 40
+          "tables": 223,
+          "relations": 74,
+          "source": "oracle"
         },
         {
           "id": "airsoft_module8_invoice_systems",
           "label": "Invoice system",
           "file": "airsoft_module8_invoice_systems.schema.json",
           "kind": "airsoft_module",
-          "tables": 0,
-          "relations": 0
+          "tables": 130,
+          "relations": 144,
+          "source": "oracle"
         }
       ],
-      "tables": 83,
-      "relations": 40
+      "tables": 414,
+      "relations": 244,
+      "source": "oracle"
     }
   ]
 }
