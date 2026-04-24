@@ -37,7 +37,7 @@ AIRSOFT_FILE = f"{AIRSOFT_DATASET_ID}.schema.json"
 AIRSOFT_TOP_LABEL = "Airsoft (vista completa)"
 
 # Bump cuando cambia el template de explicacion (invalida .ai_explanations_cache.json antiguo).
-AI_EXPL_CACHE_VER = 4
+AI_EXPL_CACHE_VER = 5
 
 AIRSOFT_MODULES: List[Tuple[str, str, Tuple[str, ...]]] = [
     (
@@ -495,25 +495,49 @@ def generate_ai_table_explanation(
     nombres de columna, PK, FK, conteos y comentario Oracle (si existe).
     No afirma procesos de negocio no respaldados por comentarios/metadata.
     """
-    # Solo descripcion funcional. Sin comentario (tabla/columnas) no inferimos propósito.
     short = table_short_name(table_name)
 
-    if table_comment and table_comment.strip():
-        return table_comment.strip()
+    # Si hay comentario de tabla, lo usamos como descripción principal (fuente fuerte).
+    base = (table_comment or "").strip()
+    if base:
+        return base
 
-    # Intentar con comentarios de columnas si existen (sin inventar propósito).
-    col_comments: List[str] = []
-    for c in columns:
-        cc = (c.get("comment") or "").strip()
-        if cc:
-            col_comments.append(cc)
-        if len(col_comments) >= 4:
-            break
-    if col_comments:
-        joined = "; ".join(col_comments[:4])
-        return f"{short}: {joined}"
+    # Heurística "IA" (determinista) basada en nombres de columnas: describe contenido, no relaciones.
+    names = [(c.get("name") or "").strip() for c in columns if (c.get("name") or "").strip()]
+    up = [n.upper() for n in names]
 
-    return "Sin descripción funcional disponible (sin comentarios en catálogo)."
+    def pick(keys: Tuple[str, ...], limit: int = 4) -> List[str]:
+        out: List[str] = []
+        for n, nu in zip(names, up):
+            if any(k in nu for k in keys):
+                out.append(n)
+            if len(out) >= limit:
+                break
+        return out
+
+    ids = pick(("ID", "COD", "CODE", "NUM", "NO_"), 5)
+    dates = pick(("FECHA", "DATE", "TIMESTAMP", "HORA", "TIME"), 4)
+    status = pick(("STATUS", "ESTADO", "STATE", "FLAG", "ACTIV"), 4)
+    amounts = pick(("AMOUNT", "MONTO", "IMPORTE", "COST", "TOTAL", "PRICE", "IVA", "TAX"), 4)
+    people = pick(("EMP", "EMPLE", "USER", "USUARIO", "PERSON", "NOMBRE", "NAME"), 4)
+
+    bits: List[str] = []
+    if ids:
+        bits.append(f"identificadores ({', '.join(ids)})")
+    if dates:
+        bits.append(f"fechas/tiempos ({', '.join(dates)})")
+    if status:
+        bits.append(f"estado/flags ({', '.join(status)})")
+    if amounts:
+        bits.append(f"montos/costos ({', '.join(amounts)})")
+    if people:
+        bits.append(f"personas/usuarios ({', '.join(people)})")
+
+    if not bits:
+        sample = ", ".join(names[:6]) if names else "sin columnas"
+        return f"Contiene columnas: {sample}."
+
+    return "Contiene: " + "; ".join(bits) + "."
 
 
 def generate_ollama_table_explanation(

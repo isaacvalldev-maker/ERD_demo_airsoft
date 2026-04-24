@@ -9,25 +9,25 @@
     <title>ERD</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: #f1f5f9; font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; color: #0f172a; }
+      body { background: #0b1220; font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; color: #e2e8f0; }
       #toolbar {
         position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-        background: white; border-bottom: 1px solid #e2e8f0;
+        background: #0f172a; border-bottom: 1px solid #1f2a44;
         padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 8px;
-        box-shadow: 0 1px 4px rgba(2, 6, 23, 0.08);
+        box-shadow: 0 1px 4px rgba(2, 6, 23, 0.35);
       }
       .toolbar-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; }
       .toolbar-sep { flex: 1 1 auto; min-width: 8px; }
-      #toolbar h1 { font-size: 16px; font-weight: 700; color: #0f172a; }
+      #toolbar h1 { font-size: 16px; font-weight: 800; color: #e2e8f0; }
       .tabset { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
       .tabset button,
       .pill {
-        border: 1px solid #cbd5e1; background: #f8fafc; color: #334155;
+        border: 1px solid #2a3a5c; background: #0b1220; color: #cbd5e1;
         padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
         white-space: nowrap;
       }
       .tabset button.active, .pill.active { background: #4f46e5; color: white; border-color: #4338ca; }
-      .pill.ghost { background: white; }
+      .pill.ghost { background: #0f172a; }
       .db-badge {
         display: inline-block;
         margin-left: 6px;
@@ -35,29 +35,30 @@
         border-radius: 999px;
         font-size: 10px;
         line-height: 1.1;
-        border: 1px solid #cbd5e1;
-        background: #fff;
-        color: #475569;
+        border: 1px solid #2a3a5c;
+        background: #0b1220;
+        color: #94a3b8;
         vertical-align: middle;
       }
       .db-badge.db2 { border-color: #22c55e55; color: #166534; }
       .db-badge.oracle { border-color: #f59e0b55; color: #92400e; }
-      #airsoft-parts { display: none; width: 100%; padding-top: 6px; border-top: 1px solid #e2e8f0; }
-      #airsoft-parts .airsoft-filter-label { color: #64748b; font-size: 11px; font-weight: 600; margin-right: 8px; align-self: center; }
+      #airsoft-parts { display: none; width: 100%; padding-top: 6px; border-top: 1px solid #1f2a44; }
+      #airsoft-parts .airsoft-filter-label { color: #94a3b8; font-size: 11px; font-weight: 700; margin-right: 8px; align-self: center; }
       #airsoft-parts .tabset { gap: 5px; flex: 1; flex-wrap: wrap; }
       #airsoft-parts .pill { font-size: 12px; padding: 6px 12px; min-width: 2.5rem; }
       #airsoft-parts .pill.filter-todo { font-weight: 600; }
       #search {
         margin-left: 8px; width: 220px; border: 1px solid #cbd5e1;
         border-radius: 8px; padding: 6px 10px; font-size: 12px; outline: none;
+        background: #0b1220; color: #e2e8f0; border-color: #2a3a5c;
       }
-      #search:focus { border-color: #4f46e5; }
+      #search:focus { border-color: #6366f1; }
       .toolbar-btn {
-        border: 1px solid #cbd5e1; background: white; color: #334155;
+        border: 1px solid #2a3a5c; background: #0b1220; color: #cbd5e1;
         border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
       }
-      #stats { color: #64748b; font-size: 12px; margin-left: 6px; }
-      #hint { color: #94a3b8; font-size: 11px; margin-left: auto; }
+      #stats { color: #94a3b8; font-size: 12px; margin-left: 6px; }
+      #hint { color: #64748b; font-size: 11px; margin-left: auto; }
       #canvas { position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
       svg { width: 100%; height: 100%; }
       .table-box { cursor: grab; }
@@ -80,6 +81,8 @@
         border: 1px solid #334155; border-radius: 999px;
         color: #93c5fd; font-size: 10px; letter-spacing: 0.02em;
       }
+      #table-tooltip .meta-badge.comment { color: #fbbf24; border-color: #fbbf2433; }
+      #table-tooltip .meta-badge.ai { color: #a7f3d0; border-color: #a7f3d033; }
       #error {
         position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
         background: #0f172ae0; color: #fff; padding: 20px; text-align: center; z-index: 200;
@@ -124,7 +127,7 @@
     <div id="table-tooltip" role="tooltip">
       <strong></strong>
       <span id="table-tooltip-text"></span>
-      <span class="meta-badge">Descripcion basada en nombres de columna, PK/FK y comentarios Oracle</span>
+      <span id="table-tooltip-badge" class="meta-badge">Descripción</span>
     </div>
     <div id="error"></div>
 
@@ -155,6 +158,7 @@
       const tooltipEl = document.getElementById("table-tooltip");
       const tooltipTitleEl = tooltipEl.querySelector("strong");
       const tooltipTextEl = document.getElementById("table-tooltip-text");
+      const tooltipBadgeEl = document.getElementById("table-tooltip-badge");
       const airsoftRow = document.getElementById("airsoft-parts");
       const airsoftTabs = document.getElementById("airsoft-tabs");
       const AIRSOFT_ROOT_ID = "airsoft_full";
@@ -200,9 +204,14 @@
         tooltipEl.style.top = `${y}px`;
       }
 
-      function showTooltip(tableName, text, clientX, clientY) {
+      function showTooltip(tableName, text, badgeText, badgeKind, clientX, clientY) {
         tooltipTitleEl.textContent = tableName;
         tooltipTextEl.textContent = text;
+        if (tooltipBadgeEl) {
+          tooltipBadgeEl.textContent = badgeText || "";
+          tooltipBadgeEl.classList.remove("comment", "ai");
+          if (badgeKind) tooltipBadgeEl.classList.add(badgeKind);
+        }
         tooltipEl.classList.add("visible");
         moveTooltip(clientX, clientY);
       }
@@ -362,6 +371,13 @@
         return el;
       }
 
+      function clientToWorld(clientX, clientY) {
+        const rect = svg.getBoundingClientRect();
+        const sx = clientX - rect.left;
+        const sy = clientY - rect.top;
+        return { x: (sx - pz.x) / pz.scale, y: (sy - pz.y) / pz.scale };
+      }
+
       function renderEdges() {
         edgesG.innerHTML = "";
         visibleRefs.forEach((r) => {
@@ -406,8 +422,12 @@
         });
       }
 
+      let _dragWired = false;
+      let _dragState = null; // { table, dx, dy }
+
       function renderTables() {
         tablesG.innerHTML = "";
+        const tableEls = {};
         visibleTables.forEach((t) => {
           const cols = schema.columns[t] || [];
           const pks = new Set(schema.pks[t] || []);
@@ -419,13 +439,16 @@
           const pos = positions[t];
           const h = tableHeights[t];
           const clr = getTableColor(t);
+          const hasComment = Boolean(schema.table_comments && schema.table_comments[t]);
           const tableExplanation =
             (schema.ai_table_explanations && schema.ai_table_explanations[t]) ||
             (schema.table_comments && schema.table_comments[t]) ||
-            "Descripción generada por IA no disponible para esta tabla.";
+            "Descripción no disponible.";
+          const badgeText = hasComment ? "Basado en comentarios del catálogo" : "Generado por IA";
+          const badgeKind = hasComment ? "comment" : "ai";
 
           const g = mkSVG("g", { class: "table-box", transform: `translate(${pos.x},${pos.y})`, "data-table": t });
-          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "#fff", filter: "url(#shadow)", stroke: clr, "stroke-width": 1.8, "stroke-opacity": 0.35 }));
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "#0b1220", filter: "url(#shadow)", stroke: clr, "stroke-width": 1.8, "stroke-opacity": 0.35 }));
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: clr }));
           g.appendChild(mkSVG("rect", { x: 0, y: HDR_H - 10, width: COL_W, height: 10, fill: clr }));
 
@@ -438,7 +461,7 @@
           g.appendChild(cnt);
 
           const hoverHit = mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: "transparent", stroke: "none" });
-          hoverHit.addEventListener("mouseenter", (evt) => showTooltip(t, tableExplanation, evt.clientX, evt.clientY));
+          hoverHit.addEventListener("mouseenter", (evt) => showTooltip(t, tableExplanation, badgeText, badgeKind, evt.clientX, evt.clientY));
           hoverHit.addEventListener("mousemove", (evt) => {
             if (tooltipEl.classList.contains("visible")) moveTooltip(evt.clientX, evt.clientY);
           });
@@ -453,7 +476,7 @@
             const fill = isPK ? "#fef3c7" : isFK ? "#e0e7ff" : isUQ ? "#dcfce7" : "transparent";
             g.appendChild(mkSVG("rect", { x: 2, y: y - 1, width: COL_W - 4, height: ROW_H - 2, rx: 4, fill }));
 
-            const colName = mkSVG("text", { x: 14, y: y + 18, class: "col-name", fill: isPK ? "#92400e" : isFK ? "#3730a3" : isUQ ? "#047857" : "#0f172a" });
+            const colName = mkSVG("text", { x: 14, y: y + 18, class: "col-name", fill: isPK ? "#fbbf24" : isFK ? "#a5b4fc" : isUQ ? "#86efac" : "#e2e8f0" });
             colName.textContent = col.name;
             g.appendChild(colName);
 
@@ -464,6 +487,40 @@
 
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "none", stroke: clr, "stroke-width": 1.1, "stroke-opacity": 0.45 }));
           tablesG.appendChild(g);
+          tableEls[t] = g;
+        });
+
+        // Wire drag once (listeners persist); update live map each render.
+        if (!_dragWired) {
+          _dragWired = true;
+          window.addEventListener("mousemove", (evt) => {
+            if (!_dragState) return;
+            const wp = clientToWorld(evt.clientX, evt.clientY);
+            const nx = Math.round(wp.x - _dragState.dx);
+            const ny = Math.round(wp.y - _dragState.dy);
+            positions[_dragState.table] = { x: nx, y: ny };
+            // Table element might be recreated on rerender; query current one.
+            const el = document.querySelector(`.table-box[data-table="${_dragState.table}"]`);
+            if (el) el.setAttribute("transform", `translate(${nx},${ny})`);
+            renderEdges();
+          });
+          window.addEventListener("mouseup", () => {
+            _dragState = null;
+          });
+        }
+
+        tablesG.querySelectorAll(".table-box").forEach((node) => {
+          node.addEventListener("mousedown", (evt) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            const table = node.getAttribute("data-table");
+            if (!table) return;
+            const wp = clientToWorld(evt.clientX, evt.clientY);
+            const cur = positions[table];
+            if (!cur) return;
+            _dragState = { table, dx: wp.x - cur.x, dy: wp.y - cur.y };
+            hideTooltip();
+          });
         });
       }
 
