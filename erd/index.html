@@ -87,6 +87,66 @@
         position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
         background: #0f172ae0; color: #fff; padding: 20px; text-align: center; z-index: 200;
       }
+
+      /* Selection + focus */
+      .table-box.faded { opacity: 0.22; }
+      .table-box.neighbor { opacity: 0.9; }
+      .table-box.selected { opacity: 1; }
+
+      /* Right-side details panel */
+      #details-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 340px;
+        padding: 12px 12px 14px;
+        background: #0b1220f5;
+        border-left: 1px solid #1f2a44;
+        z-index: 120;
+        display: none;
+        overflow: auto;
+        backdrop-filter: blur(6px);
+      }
+      #details-panel.visible { display: block; }
+      #details-title { font-size: 14px; font-weight: 800; color: #e2e8f0; margin-bottom: 6px; word-break: break-word; }
+      #details-meta { color: #94a3b8; font-size: 12px; margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+      .details-chip { border: 1px solid #2a3a5c; background: #0f172a; padding: 4px 8px; border-radius: 999px; font-size: 11px; color: #cbd5e1; }
+      #details-desc { color: #e2e8f0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+      #details-close {
+        position: sticky;
+        top: 0;
+        float: right;
+        margin-left: 10px;
+        border: 1px solid #2a3a5c;
+        background: #0f172a;
+        color: #cbd5e1;
+        border-radius: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      /* Minimap */
+      #minimap {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        width: 220px;
+        height: 150px;
+        border: 1px solid #1f2a44;
+        background: #0b1220cc;
+        border-radius: 10px;
+        z-index: 110;
+        overflow: hidden;
+        display: none;
+        backdrop-filter: blur(6px);
+      }
+      #minimap.visible { display: block; }
+      #minimap svg { width: 100%; height: 100%; }
+      #minimap .vp { fill: none; stroke: #93c5fd; stroke-width: 1.2; opacity: 0.95; }
+      #minimap .dot { fill: #94a3b8; opacity: 0.75; }
+      #minimap .dot.sel { fill: #a7f3d0; opacity: 1; }
     </style>
   </head>
   <body>
@@ -129,6 +189,19 @@
       <span id="table-tooltip-text"></span>
       <span id="table-tooltip-badge" class="meta-badge">Descripción</span>
     </div>
+    <div id="details-panel" aria-label="Detalles de tabla">
+      <button id="details-close" type="button">Cerrar</button>
+      <div id="details-title"></div>
+      <div id="details-meta"></div>
+      <div id="details-desc"></div>
+    </div>
+    <div id="minimap" aria-label="Minimapa">
+      <svg id="minimap-svg" viewBox="0 0 220 150" preserveAspectRatio="none">
+        <rect x="0" y="0" width="220" height="150" fill="transparent"></rect>
+        <g id="minimap-dots"></g>
+        <rect id="minimap-vp" class="vp" x="0" y="0" width="10" height="10"></rect>
+      </svg>
+    </div>
     <div id="error"></div>
 
     <script>
@@ -159,6 +232,14 @@
       const tooltipTitleEl = tooltipEl.querySelector("strong");
       const tooltipTextEl = document.getElementById("table-tooltip-text");
       const tooltipBadgeEl = document.getElementById("table-tooltip-badge");
+      const detailsPanelEl = document.getElementById("details-panel");
+      const detailsTitleEl = document.getElementById("details-title");
+      const detailsMetaEl = document.getElementById("details-meta");
+      const detailsDescEl = document.getElementById("details-desc");
+      const detailsCloseEl = document.getElementById("details-close");
+      const minimapEl = document.getElementById("minimap");
+      const minimapDotsEl = document.getElementById("minimap-dots");
+      const minimapVpEl = document.getElementById("minimap-vp");
       const airsoftRow = document.getElementById("airsoft-parts");
       const airsoftTabs = document.getElementById("airsoft-tabs");
       const AIRSOFT_ROOT_ID = "airsoft_full";
@@ -178,6 +259,10 @@
       let visibleRefs = [];
       let positions = {};
       let tableHeights = {};
+      let selectedTable = null;
+      let neighborTables = new Set();
+      let refsByTable = {};
+      let bounds = null;
 
       function syncCanvasTop() {
         if (!canvasEl || !toolbar) return;
@@ -222,6 +307,119 @@
 
       function applyTransform() {
         viewport.setAttribute("transform", `translate(${pz.x},${pz.y}) scale(${pz.scale})`);
+        updateMinimapViewport();
+      }
+
+      function clearSelection() {
+        selectedTable = null;
+        neighborTables = new Set();
+        if (detailsPanelEl) detailsPanelEl.classList.remove("visible");
+        rerender();
+      }
+
+      if (detailsCloseEl) {
+        detailsCloseEl.addEventListener("click", clearSelection);
+      }
+
+      function setSelection(tableName) {
+        selectedTable = tableName;
+        neighborTables = new Set();
+        if (tableName && refsByTable[tableName]) {
+          refsByTable[tableName].forEach((r) => {
+            neighborTables.add(r.from_table);
+            neighborTables.add(r.to_table);
+          });
+        }
+        updateDetailsPanel();
+        rerender();
+      }
+
+      function updateDetailsPanel() {
+        if (!detailsPanelEl) return;
+        if (!selectedTable) {
+          detailsPanelEl.classList.remove("visible");
+          return;
+        }
+        detailsPanelEl.classList.add("visible");
+        if (detailsTitleEl) detailsTitleEl.textContent = selectedTable;
+        const cols = (schema && schema.columns && schema.columns[selectedTable]) ? schema.columns[selectedTable] : [];
+        const rels = refsByTable[selectedTable] ? refsByTable[selectedTable].length : 0;
+        const desc = (schema && schema.ai_table_explanations && schema.ai_table_explanations[selectedTable]) || "";
+        if (detailsMetaEl) {
+          detailsMetaEl.innerHTML = "";
+          const mk = (txt) => {
+            const s = document.createElement("span");
+            s.className = "details-chip";
+            s.textContent = txt;
+            return s;
+          };
+          detailsMetaEl.appendChild(mk(`${cols.length} columnas`));
+          detailsMetaEl.appendChild(mk(`${rels} relaciones directas`));
+        }
+        if (detailsDescEl) {
+          detailsDescEl.textContent = desc || "Sin descripción.";
+        }
+      }
+
+      function updateMinimap() {
+        if (!minimapEl || !minimapDotsEl || !minimapVpEl) return;
+        if (!bounds || !Object.keys(positions).length) {
+          minimapEl.classList.remove("visible");
+          return;
+        }
+        minimapEl.classList.add("visible");
+        minimapDotsEl.innerHTML = "";
+        const W = 220;
+        const H = 150;
+        const b = bounds;
+        const sx = (W - 14) / Math.max(1, b.maxX - b.minX);
+        const sy = (H - 14) / Math.max(1, b.maxY - b.minY);
+        const s = Math.min(sx, sy);
+        const ox = 7 - b.minX * s;
+        const oy = 7 - b.minY * s;
+
+        Object.entries(positions).forEach(([t, p]) => {
+          const cx = ox + p.x * s;
+          const cy = oy + p.y * s;
+          const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          dot.setAttribute("cx", String(cx));
+          dot.setAttribute("cy", String(cy));
+          dot.setAttribute("r", t === selectedTable ? "2.6" : "1.6");
+          dot.setAttribute("class", t === selectedTable ? "dot sel" : "dot");
+          minimapDotsEl.appendChild(dot);
+        });
+        updateMinimapViewport();
+      }
+
+      function updateMinimapViewport() {
+        if (!minimapEl || !minimapVpEl || !bounds) return;
+        if (!minimapEl.classList.contains("visible")) return;
+        const W = 220;
+        const H = 150;
+        const b = bounds;
+        const sx = (W - 14) / Math.max(1, b.maxX - b.minX);
+        const sy = (H - 14) / Math.max(1, b.maxY - b.minY);
+        const s = Math.min(sx, sy);
+        const ox = 7 - b.minX * s;
+        const oy = 7 - b.minY * s;
+
+        // Screen viewport -> world bounds
+        const rect = svg.getBoundingClientRect();
+        const vw = rect.width;
+        const vh = rect.height;
+        const wMinX = (0 - pz.x) / pz.scale;
+        const wMinY = (0 - pz.y) / pz.scale;
+        const wMaxX = (vw - pz.x) / pz.scale;
+        const wMaxY = (vh - pz.y) / pz.scale;
+
+        const x = ox + wMinX * s;
+        const y = oy + wMinY * s;
+        const w = (wMaxX - wMinX) * s;
+        const h = (wMaxY - wMinY) * s;
+        minimapVpEl.setAttribute("x", String(x));
+        minimapVpEl.setAttribute("y", String(y));
+        minimapVpEl.setAttribute("width", String(Math.max(8, w)));
+        minimapVpEl.setAttribute("height", String(Math.max(8, h)));
       }
 
       function getTableColor(tableName) {
@@ -289,97 +487,81 @@
           components.push(comp);
         });
 
-        const connected = components.filter((c) => c.length > 1).sort((a, b) => b.length - a.length);
-        const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
+        // Clustered layout: group by schema/prefix to create visual "islands".
+        const groupKey = (t) => {
+          if (t.includes(".")) return t.split(".", 1)[0].toUpperCase();
+          return t.split("_", 1)[0].toUpperCase();
+        };
 
-        // Star layout for connected components (rings), but keep isolated tables aligned on the sides.
+        const groups = {};
+        visibleTables.forEach((t) => {
+          const k = groupKey(t);
+          (groups[k] ||= []).push(t);
+        });
+        const gKeys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b));
+
         positions = {};
-        // Horizontal-first layout: components extend to the right (no wrapping down).
-        let ox = 80;
-        const oy = 70;
-        let rowMaxH = 0;
-        const CW = COL_W + 120;
+        const START_X = 90;
+        const START_Y = 80;
+        const CLUSTER_GAP_X = 320;
+        const CLUSTER_GAP_Y = 320;
+        const MAX_ROW_W = 5200; // prevents a long stretched strip
 
-        connected.forEach((comp) => {
-          const hub = comp.reduce((best, cur) => (adj[cur].size > adj[best].size ? cur : best), comp[0]);
-          const compSet = new Set(comp);
-          const dist = { [hub]: 0 };
-          const q = [hub];
-          while (q.length) {
-            const cur = q.shift();
-            adj[cur].forEach((nb) => {
-              if (compSet.has(nb) && !(nb in dist)) {
-                dist[nb] = dist[cur] + 1;
-                q.push(nb);
-              }
-            });
+        let curX = START_X;
+        let curY = START_Y;
+        let maxRowH = 0;
+
+        gKeys.forEach((k) => {
+          const tables = groups[k].slice().sort();
+          const n = tables.length;
+          const cols = Math.max(2, Math.min(9, Math.ceil(Math.sqrt(n))));
+          const rows = Math.ceil(n / cols);
+          const cellW = COL_W + 120;
+
+          // row heights based on tallest card in that row
+          const rowHeights = new Array(rows).fill(0);
+          for (let i = 0; i < n; i += 1) {
+            const r = Math.floor(i / cols);
+            rowHeights[r] = Math.max(rowHeights[r], tableHeights[tables[i]] || (HDR_H + 140));
           }
 
-          const rings = [];
-          comp.forEach((t) => {
-            const d = dist[t] || 0;
-            while (rings.length <= d) rings.push([]);
-            rings[d].push(t);
-          });
-          rings.forEach((r) => r.sort());
+          const clusterW = cols * cellW;
+          const clusterH = rowHeights.reduce((a, b) => a + b, 0) + (rows - 1) * 90;
 
-          const radii = [0];
-          for (let i = 1; i < rings.length; i += 1) {
-            const n = rings[i].length;
-            const minR = (n * CW) / (2 * Math.PI);
-            radii.push(Math.max(minR, radii[i - 1] + CW * 1.2));
+          if (curX + clusterW > START_X + MAX_ROW_W && curX !== START_X) {
+            curX = START_X;
+            curY += maxRowH + CLUSTER_GAP_Y;
+            maxRowH = 0;
           }
-          const maxR = radii[radii.length - 1] + COL_W;
-          const cx = ox + maxR;
-          const cy = oy + maxR + 80;
 
-          rings.forEach((ring, ri) => {
-            ring.forEach((t, i) => {
-              const angle = ri === 0 ? -Math.PI / 2 : (2 * Math.PI * i) / ring.length - Math.PI / 2;
+          let yy = curY;
+          for (let r = 0; r < rows; r += 1) {
+            for (let c = 0; c < cols; c += 1) {
+              const idx = r * cols + c;
+              if (idx >= n) break;
+              const t = tables[idx];
               positions[t] = {
-                x: Math.round(cx + radii[ri] * Math.cos(angle)),
-                y: Math.round(cy + radii[ri] * Math.sin(angle)),
+                x: curX + c * cellW,
+                y: yy,
               };
-            });
-          });
+            }
+            yy += rowHeights[r] + 90;
+          }
 
-          const compW = maxR * 2 + COL_W + 220;
-          const compH = maxR * 2 + 220;
-          rowMaxH = Math.max(rowMaxH, compH);
-          ox += compW;
-          // No wrap: keep everything flowing horizontally.
+          curX += clusterW + CLUSTER_GAP_X;
+          maxRowH = Math.max(maxRowH, clusterH);
         });
 
-        // Isolated tables: arrange on a circle around the star cluster.
-        const connectedKeys = Object.keys(positions);
-        if (isolated.length) {
-          // If there are no connected tables (only isolated), fall back to a simple row.
-          if (!connectedKeys.length) {
-            isolated.forEach((t, idx) => {
-              positions[t] = { x: 80 + idx * (COL_W + 90), y: 70 };
-            });
-          } else {
-            const xs = connectedKeys.map((k) => positions[k].x);
-            const ys = connectedKeys.map((k) => positions[k].y);
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs) + COL_W;
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-            const cx = (minX + maxX) / 2;
-            const cy = (minY + maxY) / 2;
-            const rx = (maxX - minX) / 2;
-            const ry = (maxY - minY) / 2;
-            const radius = Math.max(rx, ry) + 620;
-
-            const step = (2 * Math.PI) / isolated.length;
-            isolated.forEach((t, i) => {
-              const theta = -Math.PI / 2 + i * step;
-              positions[t] = {
-                x: Math.round(cx + radius * Math.cos(theta)),
-                y: Math.round(cy + radius * Math.sin(theta)),
-              };
-            });
-          }
+        // Update bounds for minimap/fit
+        const vals = Object.values(positions);
+        if (vals.length) {
+          const minX = Math.min(...vals.map((p) => p.x));
+          const minY = Math.min(...vals.map((p) => p.y));
+          const maxX = Math.max(...vals.map((p) => p.x)) + COL_W;
+          const maxY = Math.max(...vals.map((p) => p.y)) + 260;
+          bounds = { minX, minY, maxX, maxY };
+        } else {
+          bounds = null;
         }
       }
 
@@ -427,13 +609,16 @@
           }
 
           const d = `M${fx},${fy} C${cp1},${fy} ${cp2},${ty} ${tx},${ty}`;
+          const isFocus = selectedTable && (r.from_table === selectedTable || r.to_table === selectedTable);
+          const isRelated = selectedTable && (neighborTables.has(r.from_table) && neighborTables.has(r.to_table));
+          const dim = selectedTable && !isRelated;
           edgesG.appendChild(
             mkSVG("path", {
               d,
               fill: "none",
-              stroke: "#6366f1",
-              "stroke-width": 2,
-              "stroke-opacity": 0.55,
+              stroke: isFocus ? "#a7f3d0" : "#6366f1",
+              "stroke-width": isFocus ? 2.6 : 2,
+              "stroke-opacity": dim ? 0.08 : 0.55,
               "marker-end": "url(#arrow)",
             })
           );
@@ -466,7 +651,11 @@
           const badgeKind = hasComment ? "comment" : "ai";
 
           const g = mkSVG("g", { class: "table-box", transform: `translate(${pos.x},${pos.y})`, "data-table": t });
-          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "#0b1220", filter: "url(#shadow)", stroke: clr, "stroke-width": 1.8, "stroke-opacity": 0.35 }));
+          g.addEventListener("click", (evt) => {
+            evt.stopPropagation();
+            setSelection(t);
+          });
+          g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 12, fill: "#0b1220", filter: "url(#shadow)", stroke: clr, "stroke-width": 2.2, "stroke-opacity": 0.55 }));
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: HDR_H, rx: 10, fill: clr }));
           g.appendChild(mkSVG("rect", { x: 0, y: HDR_H - 10, width: COL_W, height: 10, fill: clr }));
 
@@ -491,7 +680,7 @@
             const isPK = pks.has(col.name);
             const isFK = fkMap[col.name];
             const isUQ = uqs.has(col.name) && !isPK;
-            const fill = isPK ? "#fef3c7" : isFK ? "#e0e7ff" : isUQ ? "#dcfce7" : "transparent";
+            const fill = isPK ? "#2a2206" : isFK ? "#0b1b3d" : isUQ ? "#052413" : "transparent";
             g.appendChild(mkSVG("rect", { x: 2, y: y - 1, width: COL_W - 4, height: ROW_H - 2, rx: 4, fill }));
 
             const colName = mkSVG("text", { x: 14, y: y + 18, class: "col-name", fill: isPK ? "#fbbf24" : isFK ? "#a5b4fc" : isUQ ? "#86efac" : "#e2e8f0" });
@@ -504,6 +693,12 @@
           });
 
           g.appendChild(mkSVG("rect", { x: 0, y: 0, width: COL_W, height: h, rx: 10, fill: "none", stroke: clr, "stroke-width": 1.1, "stroke-opacity": 0.45 }));
+          // Selection fade
+          if (selectedTable) {
+            if (t === selectedTable) g.classList.add("selected");
+            else if (neighborTables.has(t)) g.classList.add("neighbor");
+            else g.classList.add("faded");
+          }
           tablesG.appendChild(g);
           tableEls[t] = g;
         });
@@ -624,6 +819,7 @@
         renderEdges();
         fitAll();
         updateStats();
+        updateMinimap();
       }
 
       async function loadDataset(key) {
@@ -830,6 +1026,12 @@
           psy = evt.clientY;
           pox = pz.x;
           poy = pz.y;
+        }
+      });
+      // Click on empty space clears selection
+      svg.addEventListener("click", (evt) => {
+        if (evt.target === svg || evt.target.id === "svg") {
+          clearSelection();
         }
       });
       window.addEventListener("mousemove", (evt) => {
