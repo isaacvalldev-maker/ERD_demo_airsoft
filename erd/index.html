@@ -67,6 +67,8 @@
       .table-meta { font-size: 12px; fill: rgba(255, 255, 255, 0.8); text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
       .col-name { font-size: 14px; font-family: "Segoe UI", system-ui, sans-serif; }
       .col-type { font-size: 11.5px; fill: #94a3b8; text-anchor: end; font-family: "Segoe UI", system-ui, sans-serif; }
+      .section-label { fill: #cbd5e1; font-size: 13px; font-weight: 900; letter-spacing: 0.03em; opacity: 0.95; }
+      .section-sub { fill: #94a3b8; font-size: 11px; font-weight: 600; opacity: 0.9; }
       #table-tooltip {
         position: fixed; z-index: 220; max-width: 400px; pointer-events: none;
         background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 8px;
@@ -119,6 +121,7 @@
           </filter>
         </defs>
         <g id="viewport">
+          <g id="labels"></g>
           <g id="edges"></g>
           <g id="tables"></g>
         </g>
@@ -148,6 +151,7 @@
 
       const svg = document.getElementById("svg");
       const viewport = document.getElementById("viewport");
+      const labelsG = document.getElementById("labels");
       const edgesG = document.getElementById("edges");
       const tablesG = document.getElementById("tables");
       const canvasEl = document.getElementById("canvas");
@@ -178,6 +182,7 @@
       let visibleRefs = [];
       let positions = {};
       let tableHeights = {};
+      let sectionBounds = { core: null, secondary: null };
 
       function syncCanvasTop() {
         if (!canvasEl || !toolbar) return;
@@ -293,6 +298,7 @@
         const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
 
         positions = {};
+        sectionBounds = { core: null, secondary: null };
         let ox = 80;
         let oy = 70;
         let rowMaxH = 0;
@@ -378,6 +384,33 @@
             };
           });
         }
+
+        // Compute section bounds (for labels)
+        const connectedSet = new Set();
+        connected.forEach((comp) => comp.forEach((t) => connectedSet.add(t)));
+        const connectedVals = Object.entries(positions)
+          .filter(([t]) => connectedSet.has(t))
+          .map(([, p]) => p);
+        if (connectedVals.length) {
+          sectionBounds.core = {
+            minX: Math.min(...connectedVals.map((p) => p.x)),
+            minY: Math.min(...connectedVals.map((p) => p.y)),
+            maxX: Math.max(...connectedVals.map((p) => p.x)) + COL_W,
+            maxY: Math.max(...connectedVals.map((p) => p.y)) + 260,
+          };
+        }
+        const isolatedSet = new Set(isolated);
+        const isolatedVals = Object.entries(positions)
+          .filter(([t]) => isolatedSet.has(t))
+          .map(([, p]) => p);
+        if (isolatedVals.length) {
+          sectionBounds.secondary = {
+            minX: Math.min(...isolatedVals.map((p) => p.x)),
+            minY: Math.min(...isolatedVals.map((p) => p.y)),
+            maxX: Math.max(...isolatedVals.map((p) => p.x)) + COL_W,
+            maxY: Math.max(...isolatedVals.map((p) => p.y)) + 260,
+          };
+        }
       }
 
       function mkSVG(tag, attrs) {
@@ -435,6 +468,29 @@
             })
           );
         });
+      }
+
+      function renderSectionLabels() {
+        if (!labelsG) return;
+        labelsG.innerHTML = "";
+        const pad = 18;
+
+        const add = (b, title, subtitle) => {
+          if (!b) return;
+          const x = Math.round(b.minX);
+          const y = Math.round(b.minY - pad);
+          const t1 = mkSVG("text", { x, y, class: "section-label" });
+          t1.textContent = title;
+          labelsG.appendChild(t1);
+          if (subtitle) {
+            const t2 = mkSVG("text", { x, y: y + 16, class: "section-sub" });
+            t2.textContent = subtitle;
+            labelsG.appendChild(t2);
+          }
+        };
+
+        add(sectionBounds.core, "Core schema", "Tablas más conectadas (layout estrella)");
+        add(sectionBounds.secondary, "Secondary tables", "Baja conectividad (grid lateral)");
       }
 
       let _dragWired = false;
@@ -615,6 +671,7 @@
         computeLayout();
         renderTables();
         renderEdges();
+        renderSectionLabels();
         fitAll();
         updateStats();
       }
