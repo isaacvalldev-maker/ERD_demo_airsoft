@@ -831,7 +831,8 @@
           evt.preventDefault();
           // Smooth zoom (trackpad-friendly) anchored under cursor.
           const oldScale = pz.scale;
-          const factor = Math.exp(-evt.deltaY * 0.0015);
+          // Smaller coefficient => more progressive (less jumpy) zoom per wheel tick.
+          const factor = Math.exp(-evt.deltaY * 0.0008);
           const targetScale = oldScale * factor;
           const newScale = Math.min(4, Math.max(0.15, targetScale));
           const ratio = newScale / oldScale;
