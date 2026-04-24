@@ -92,6 +92,7 @@
       .table-box.faded { opacity: 0.22; }
       .table-box.neighbor { opacity: 0.9; }
       .table-box.selected { opacity: 1; }
+      .table-box.core rect:first-child { stroke-width: 3.2; stroke-opacity: 0.75; }
 
       /* Right-side details panel */
       #details-panel {
@@ -126,27 +127,6 @@
         cursor: pointer;
         font-size: 12px;
       }
-
-      /* Minimap */
-      #minimap {
-        position: fixed;
-        right: 12px;
-        bottom: 12px;
-        width: 220px;
-        height: 150px;
-        border: 1px solid #1f2a44;
-        background: #0b1220cc;
-        border-radius: 10px;
-        z-index: 110;
-        overflow: hidden;
-        display: none;
-        backdrop-filter: blur(6px);
-      }
-      #minimap.visible { display: block; }
-      #minimap svg { width: 100%; height: 100%; }
-      #minimap .vp { fill: none; stroke: #93c5fd; stroke-width: 1.2; opacity: 0.95; }
-      #minimap .dot { fill: #94a3b8; opacity: 0.75; }
-      #minimap .dot.sel { fill: #a7f3d0; opacity: 1; }
 
       /* Cluster boxes */
       .cluster-box { fill: #0f172a; stroke: #1f2a44; stroke-width: 1.4; opacity: 0.95; }
@@ -200,13 +180,6 @@
       <div id="details-meta"></div>
       <div id="details-desc"></div>
     </div>
-    <div id="minimap" aria-label="Minimapa">
-      <svg id="minimap-svg" viewBox="0 0 220 150" preserveAspectRatio="none">
-        <rect x="0" y="0" width="220" height="150" fill="transparent"></rect>
-        <g id="minimap-dots"></g>
-        <rect id="minimap-vp" class="vp" x="0" y="0" width="10" height="10"></rect>
-      </svg>
-    </div>
     <div id="error"></div>
 
     <script>
@@ -243,9 +216,6 @@
       const detailsMetaEl = document.getElementById("details-meta");
       const detailsDescEl = document.getElementById("details-desc");
       const detailsCloseEl = document.getElementById("details-close");
-      const minimapEl = document.getElementById("minimap");
-      const minimapDotsEl = document.getElementById("minimap-dots");
-      const minimapVpEl = document.getElementById("minimap-vp");
       const airsoftRow = document.getElementById("airsoft-parts");
       const airsoftTabs = document.getElementById("airsoft-tabs");
       const AIRSOFT_ROOT_ID = "airsoft_full";
@@ -270,6 +240,7 @@
       let refsByTable = {};
       let bounds = null;
       let clusterLayouts = [];
+      let coreTables = new Set();
 
       function syncCanvasTop() {
         if (!canvasEl || !toolbar) return;
@@ -314,7 +285,6 @@
 
       function applyTransform() {
         viewport.setAttribute("transform", `translate(${pz.x},${pz.y}) scale(${pz.scale})`);
-        updateMinimapViewport();
       }
 
       function clearSelection() {
@@ -368,66 +338,6 @@
         }
       }
 
-      function updateMinimap() {
-        if (!minimapEl || !minimapDotsEl || !minimapVpEl) return;
-        if (!bounds || !Object.keys(positions).length) {
-          minimapEl.classList.remove("visible");
-          return;
-        }
-        minimapEl.classList.add("visible");
-        minimapDotsEl.innerHTML = "";
-        const W = 220;
-        const H = 150;
-        const b = bounds;
-        const sx = (W - 14) / Math.max(1, b.maxX - b.minX);
-        const sy = (H - 14) / Math.max(1, b.maxY - b.minY);
-        const s = Math.min(sx, sy);
-        const ox = 7 - b.minX * s;
-        const oy = 7 - b.minY * s;
-
-        Object.entries(positions).forEach(([t, p]) => {
-          const cx = ox + p.x * s;
-          const cy = oy + p.y * s;
-          const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-          dot.setAttribute("cx", String(cx));
-          dot.setAttribute("cy", String(cy));
-          dot.setAttribute("r", t === selectedTable ? "2.6" : "1.6");
-          dot.setAttribute("class", t === selectedTable ? "dot sel" : "dot");
-          minimapDotsEl.appendChild(dot);
-        });
-        updateMinimapViewport();
-      }
-
-      function updateMinimapViewport() {
-        if (!minimapEl || !minimapVpEl || !bounds) return;
-        if (!minimapEl.classList.contains("visible")) return;
-        const W = 220;
-        const H = 150;
-        const b = bounds;
-        const sx = (W - 14) / Math.max(1, b.maxX - b.minX);
-        const sy = (H - 14) / Math.max(1, b.maxY - b.minY);
-        const s = Math.min(sx, sy);
-        const ox = 7 - b.minX * s;
-        const oy = 7 - b.minY * s;
-
-        // Screen viewport -> world bounds
-        const rect = svg.getBoundingClientRect();
-        const vw = rect.width;
-        const vh = rect.height;
-        const wMinX = (0 - pz.x) / pz.scale;
-        const wMinY = (0 - pz.y) / pz.scale;
-        const wMaxX = (vw - pz.x) / pz.scale;
-        const wMaxY = (vh - pz.y) / pz.scale;
-
-        const x = ox + wMinX * s;
-        const y = oy + wMinY * s;
-        const w = (wMaxX - wMinX) * s;
-        const h = (wMaxY - wMinY) * s;
-        minimapVpEl.setAttribute("x", String(x));
-        minimapVpEl.setAttribute("y", String(y));
-        minimapVpEl.setAttribute("width", String(Math.max(8, w)));
-        minimapVpEl.setAttribute("height", String(Math.max(8, h)));
-      }
 
       function getTableColor(tableName) {
         const owner = tableName.includes(".") ? tableName.split(".")[0] : tableName.split("_")[0];
@@ -505,16 +415,81 @@
           degree[t] = refsByTable[t] ? refsByTable[t].length : 0;
         });
 
-        const LOW_DEGREE_MAX = 1;
-        const OTHER_KEY = "Other / Low connectivity";
+        // --- Core (high connectivity) ---
+        const sortedByDegree = visibleTables
+          .slice()
+          .sort((a, b) => (degree[b] || 0) - (degree[a] || 0) || a.localeCompare(b));
 
-        const groups = {};
-        visibleTables.forEach((t) => {
-          const base = groupKey(t);
-          const k = degree[t] <= LOW_DEGREE_MAX ? OTHER_KEY : base;
-          (groups[k] ||= []).push(t);
+        const CORE_MAX = 8;
+        const CORE_MIN_DEG = 10;
+        const core = [];
+        for (const t of sortedByDegree) {
+          if (core.length >= CORE_MAX) break;
+          if ((degree[t] || 0) >= CORE_MIN_DEG) core.push(t);
+        }
+        if (core.length < 4) {
+          core.splice(0, core.length, ...sortedByDegree.slice(0, 6));
+        }
+        coreTables = new Set(core);
+
+        const placed = new Set();
+        positions = {};
+        clusterLayouts = [];
+
+        // Core area placement: compact grid near center
+        const CORE_COLS = core.length <= 4 ? 2 : 3;
+        const coreCellW = COL_W + 160;
+        const coreCellH = 320;
+        const CORE_X = 520;
+        const CORE_Y = 160;
+        core.forEach((t, i) => {
+          const r = Math.floor(i / CORE_COLS);
+          const c = i % CORE_COLS;
+          positions[t] = { x: CORE_X + c * coreCellW, y: CORE_Y + r * coreCellH };
+          placed.add(t);
         });
 
+        // Neighbor star (loose, not circular): place direct neighbors in small arcs around each core table
+        const taken = new Set(core);
+        const armRadius = 420;
+        const armStep = 60;
+        core.forEach((ct) => {
+          const base = positions[ct];
+          if (!base) return;
+          const nbs = (refsByTable[ct] || [])
+            .map((r) => (r.from_table === ct ? r.to_table : r.from_table))
+            .filter((t) => t && !coreTables.has(t));
+          const uniq = Array.from(new Set(nbs)).sort((a, b) => (degree[b] || 0) - (degree[a] || 0) || a.localeCompare(b));
+          const maxNb = 16;
+          let idx = 0;
+          for (const nb of uniq) {
+            if (idx >= maxNb) break;
+            if (taken.has(nb)) continue;
+            // Alternate placement in 4 quadrants (star arms) with slight jitter
+            const arm = idx % 4;
+            const layer = Math.floor(idx / 4);
+            const dx = (arm === 0 ? 1 : arm === 1 ? -1 : 0) * (armRadius + layer * armStep);
+            const dy = (arm === 2 ? 1 : arm === 3 ? -1 : 0) * (armRadius + layer * armStep);
+            const jx = ((idx * 37) % 60) - 30;
+            const jy = ((idx * 53) % 60) - 30;
+            positions[nb] = { x: Math.round(base.x + dx + jx), y: Math.round(base.y + dy + jy) };
+            taken.add(nb);
+            placed.add(nb);
+            idx += 1;
+          }
+        });
+
+        // --- Secondary: grouped grid clusters (quiet) ---
+        const OTHER_KEY = "Other / Low connectivity";
+        const LOW_DEGREE_MAX = 1;
+
+        const remaining = visibleTables.filter((t) => !placed.has(t));
+        const groups = {};
+        remaining.forEach((t) => {
+          const base = groupKey(t);
+          const k = (degree[t] || 0) <= LOW_DEGREE_MAX ? OTHER_KEY : base;
+          (groups[k] ||= []).push(t);
+        });
         const gKeys = Object.keys(groups).sort((a, b) => {
           if (a === OTHER_KEY) return 1;
           if (b === OTHER_KEY) return -1;
@@ -525,26 +500,25 @@
         });
 
         const vw = Math.max(900, svg.clientWidth || 1200);
-        const baseCols = Math.floor(vw / (COL_W + 140));
-        const CLUSTER_COLS = Math.max(4, Math.min(8, baseCols));
+        const baseCols = Math.floor(vw / (COL_W + 180));
+        const CLUSTER_COLS = Math.max(4, Math.min(6, baseCols));
 
-        // Cluster placement (dashboard-like)
-        positions = {};
-        clusterLayouts = [];
-        const START_X = 90;
-        const START_Y = 110;
+        // Put secondary below core area
+        const coreVals = Object.values(positions);
+        const coreMaxY = coreVals.length ? Math.max(...coreVals.map((p) => p.y)) : 200;
+        const START_X = 120;
+        const START_Y = coreMaxY + 640;
         const CLUSTER_PAD_X = 34;
-        const CLUSTER_PAD_Y = 44; // includes label space
+        const CLUSTER_PAD_Y = 44;
         const CLUSTER_GAP_X = 220;
-        const CLUSTER_GAP_Y = 260;
-        const MAX_ROW_W = 5600;
+        const CLUSTER_GAP_Y = 240;
+        const MAX_ROW_W = 5200;
 
         let curX = START_X;
         let curY = START_Y;
         let maxRowH = 0;
 
         const orderWithinGroup = (tables) => {
-          // Keep related/connected close: start from highest-degree and BFS locally.
           const set = new Set(tables);
           const localAdj = {};
           tables.forEach((t) => (localAdj[t] = new Set()));
@@ -554,7 +528,6 @@
               localAdj[r.to_table].add(r.from_table);
             }
           });
-
           const remaining = new Set(tables);
           const out = [];
           const pickSeed = () => {
@@ -566,7 +539,6 @@
             });
             return best;
           };
-
           while (remaining.size) {
             const seed = pickSeed();
             if (!seed) break;
@@ -587,9 +559,9 @@
         };
 
         gKeys.forEach((k) => {
-          const rawTables = groups[k].slice();
-          const tables = orderWithinGroup(rawTables);
+          const tables = orderWithinGroup(groups[k].slice());
           const n = tables.length;
+          if (!n) return;
           const cols = Math.min(CLUSTER_COLS, Math.max(4, Math.ceil(Math.sqrt(n))));
           const rows = Math.ceil(n / cols);
           const cellW = COL_W + 110;
@@ -611,14 +583,7 @@
             maxRowH = 0;
           }
 
-          // record cluster box (for labels + background)
-          clusterLayouts.push({
-            key: k,
-            x: curX,
-            y: curY - 56,
-            w: clusterW,
-            h: clusterH + 56,
-          });
+          clusterLayouts.push({ key: k, x: curX, y: curY - 56, w: clusterW, h: clusterH + 56 });
 
           let yy = curY;
           for (let r = 0; r < rows; r += 1) {
@@ -626,10 +591,8 @@
               const idx = r * cols + c;
               if (idx >= n) break;
               const t = tables[idx];
-              positions[t] = {
-                x: curX + CLUSTER_PAD_X + c * cellW,
-                y: yy,
-              };
+              positions[t] = { x: curX + CLUSTER_PAD_X + c * cellW, y: yy };
+              placed.add(t);
             }
             yy += rowHeights[r] + 70;
           }
@@ -755,7 +718,7 @@
           const badgeText = hasComment ? "Basado en comentarios del catálogo" : "Generado por IA";
           const badgeKind = hasComment ? "comment" : "ai";
 
-          const g = mkSVG("g", { class: "table-box", transform: `translate(${pos.x},${pos.y})`, "data-table": t });
+          const g = mkSVG("g", { class: `table-box${coreTables && coreTables.has(t) ? " core" : ""}`, transform: `translate(${pos.x},${pos.y})`, "data-table": t });
           g.addEventListener("click", (evt) => {
             evt.stopPropagation();
             setSelection(t);
@@ -925,7 +888,6 @@
         renderEdges();
         fitAll();
         updateStats();
-        updateMinimap();
       }
 
       async function loadDataset(key) {
