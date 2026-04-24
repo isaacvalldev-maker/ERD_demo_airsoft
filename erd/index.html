@@ -294,8 +294,9 @@
 
         // Star layout for connected components (rings), but keep isolated tables aligned on the sides.
         positions = {};
+        // Horizontal-first layout: components extend to the right (no wrapping down).
         let ox = 80;
-        let oy = 70;
+        const oy = 70;
         let rowMaxH = 0;
         const CW = COL_W + 120;
 
@@ -346,23 +347,21 @@
           const compH = maxR * 2 + 220;
           rowMaxH = Math.max(rowMaxH, compH);
           ox += compW;
-          if (ox > WRAP_X) {
-            ox = 80;
-            oy += rowMaxH + 240;
-            rowMaxH = 0;
-          }
+          // No wrap: keep everything flowing horizontally.
         });
 
-        // Isolated tables: keep the original layout (grid below the main cluster).
-        const cols = 6;
-        let isoY = oy + rowMaxH + 360;
-        if (Object.keys(positions).length > 0) {
-          isoY = Math.max(...Object.values(positions).map((p) => p.y)) + 420;
-        }
+        // Isolated tables: place to the right of the star cluster.
+        const ISO_ROWS = 6;
+        const ISO_X_GAP = COL_W + 90;
+        const ISO_Y_GAP = 390;
+        const isoStartX = Math.max(80, ox + 180);
+        const isoStartY = oy;
         isolated.forEach((t, idx) => {
+          const row = idx % ISO_ROWS;
+          const col = Math.floor(idx / ISO_ROWS);
           positions[t] = {
-            x: 80 + (idx % cols) * (COL_W + 90),
-            y: isoY + Math.floor(idx / cols) * 390,
+            x: isoStartX + col * ISO_X_GAP,
+            y: isoStartY + row * ISO_Y_GAP,
           };
         });
       }
