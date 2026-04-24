@@ -292,76 +292,32 @@
         const connected = components.filter((c) => c.length > 1).sort((a, b) => b.length - a.length);
         const isolated = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
 
+        // Grid layout: align tables in rows so they don't "float" at different vertical heights.
+        // Order: connected components first (bigger groups), then isolated.
+        const ordered = [];
+        connected.forEach((comp) => ordered.push(...comp.slice().sort()));
+        ordered.push(...isolated);
+
+        const GRID_COLS = 6;
+        const X_GAP = COL_W + 90;
+        const Y_GAP = 70;
+        const START_X = 80;
+        const START_Y = 70;
+
         positions = {};
-        let ox = 80;
-        let oy = 70;
+        let rowY = START_Y;
         let rowMaxH = 0;
-        const CW = COL_W + 120;
-
-        connected.forEach((comp) => {
-          const hub = comp.reduce((best, cur) => (adj[cur].size > adj[best].size ? cur : best), comp[0]);
-          const compSet = new Set(comp);
-          const dist = { [hub]: 0 };
-          const q = [hub];
-          while (q.length) {
-            const cur = q.shift();
-            adj[cur].forEach((nb) => {
-              if (compSet.has(nb) && !(nb in dist)) {
-                dist[nb] = dist[cur] + 1;
-                q.push(nb);
-              }
-            });
-          }
-
-          const rings = [];
-          comp.forEach((t) => {
-            const d = dist[t] || 0;
-            while (rings.length <= d) rings.push([]);
-            rings[d].push(t);
-          });
-          rings.forEach((r) => r.sort());
-
-          const radii = [0];
-          for (let i = 1; i < rings.length; i += 1) {
-            const n = rings[i].length;
-            const minR = (n * CW) / (2 * Math.PI);
-            radii.push(Math.max(minR, radii[i - 1] + CW * 1.2));
-          }
-          const maxR = radii[radii.length - 1] + COL_W;
-          const cx = ox + maxR;
-          const cy = oy + maxR + 80;
-
-          rings.forEach((ring, ri) => {
-            ring.forEach((t, i) => {
-              const angle = ri === 0 ? -Math.PI / 2 : (2 * Math.PI * i) / ring.length - Math.PI / 2;
-              positions[t] = {
-                x: Math.round(cx + radii[ri] * Math.cos(angle)),
-                y: Math.round(cy + radii[ri] * Math.sin(angle)),
-              };
-            });
-          });
-
-          const compW = maxR * 2 + COL_W + 220;
-          const compH = maxR * 2 + 220;
-          rowMaxH = Math.max(rowMaxH, compH);
-          ox += compW;
-          if (ox > WRAP_X) {
-            ox = 80;
-            oy += rowMaxH + 240;
+        ordered.forEach((t, idx) => {
+          const col = idx % GRID_COLS;
+          if (col === 0 && idx !== 0) {
+            rowY += rowMaxH + Y_GAP;
             rowMaxH = 0;
           }
-        });
-
-        const cols = 6;
-        let isoY = oy + rowMaxH + 360;
-        if (Object.keys(positions).length > 0) {
-          isoY = Math.max(...Object.values(positions).map((p) => p.y)) + 420;
-        }
-        isolated.forEach((t, idx) => {
           positions[t] = {
-            x: 80 + (idx % cols) * (COL_W + 90),
-            y: isoY + Math.floor(idx / cols) * 390,
+            x: START_X + col * X_GAP,
+            y: rowY,
           };
+          rowMaxH = Math.max(rowMaxH, tableHeights[t] || (HDR_H + 60));
         });
       }
 
