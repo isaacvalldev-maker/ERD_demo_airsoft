@@ -842,9 +842,9 @@
           pz._zoom.lastMy = my;
 
           const oldTarget = pz._zoom.targetScale;
-          // Clamp delta to avoid large first-step jump (mouse wheels can emit big deltas).
-          const dy = Math.max(-120, Math.min(120, evt.deltaY));
-          const factor = Math.exp(-dy * 0.00055);
+          // Clamp delta and use a gentler curve to avoid "too much" first zoom.
+          const dy = Math.max(-60, Math.min(60, evt.deltaY));
+          const factor = Math.exp(-dy * 0.0004);
           const nextTarget = Math.min(4, Math.max(0.15, oldTarget * factor));
           pz._zoom.targetScale = nextTarget;
 
